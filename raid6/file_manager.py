@@ -1,4 +1,7 @@
-class BlockManager:
+from raid6.disk_manager import DiskManager
+
+
+class FileManager:
 
     """
     block_format:
@@ -22,8 +25,11 @@ class BlockManager:
         self.disk_num = disk_num
         self.disk_size = disk_size
         self.block_size = block_size
+        self.block_num = disk_size // block_size
         self.head_size = 12
         self.data_size = self.block_size - self.head_size
+        # disk_manager
+        self.disk_manager = DiskManager(disk_size, block_size)
         # file_table
         self._last_table_disk = 0
         self._last_table_block = 0
@@ -88,7 +94,7 @@ class BlockManager:
             if d >= self.disk_num:
                 d = 0
                 b += 1
-            if (b + 1) * self.block_size > self.disk_size:
+            if b >= self.block_num:
                 return None
             if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
                 continue
@@ -171,11 +177,11 @@ class BlockManager:
 
 
     def _read_block(self, disk_idx, block_idx):
-        return bytearray()  # TODO
+        return self.disk_manager.read_block(disk_idx, block_idx)
 
 
     def _write_block(self, block, disk_idx, block_idx):
-        pass  # TODO
+        return self.disk_manager.write_block(block, disk_idx, block_idx)
 
 
     def _cal_block_p(self, block_idx):
@@ -304,3 +310,64 @@ class BlockManager:
                 break
             disk_idx = self._block_get_next_disk(block)
             block_idx = self._block_get_next_block(block)
+
+
+    def check_disk(self, disk_idx):
+        return self.disk_manager.check_disk(disk_idx)
+
+
+    def recover_failed_disks(self, d0, d1=None):
+        self.disk_manager.clear_disk(d0)
+        if d1 is not None:
+            self.disk_manager.clear_disk(d1)
+        for b in range(self.block_num):
+            p_idx = self._get_p_disk(b)
+            q_idx = self._get_q_disk(b)
+            blocks = [None for _ in range(self.disk_num - 2)]
+            for d in range(self.disk_num):
+                if d == d0 or d == d1:
+                    continue
+                blocks[d] = self._read_block(d, b)
+            p_block = blocks.pop(p_idx)
+            q_block = blocks.pop(q_idx)
+            blocks.append(p_block)
+            blocks.append(q_block)
+            d0_block, d1_block = bytearray(), bytearray()
+            for i in range(self.block_size):
+                tmp = []
+                for d in range(self.disk_num):
+                    if blocks[i] is None:
+                        tmp.append(None)
+                    else:
+                        tmp.append(blocks[d][i])
+                d0_byte, d1_byte = b'\x00', b'\x00' # TODO calculate
+                d0_block.extend(d0_byte)
+                d1_block.extend(d1_byte)
+            self._write_block(d0_block, d0, b)
+            if d1 is not None:
+                self._write_block(d1_block, d1, b)
+
+
+    def check_corrupt(self, block_idx):
+        data_blocks = []
+        pq_blocks = [None, None]
+        p_idx = self._get_p_disk(block_idx)
+        q_idx = self._get_q_disk(block_idx)
+        for d in range(self.disk_num):
+            if d == p_idx:
+                pq_blocks[0] = self._read_block(d, block_idx)
+            elif d == q_idx:
+                pq_blocks[1] = self._read_block(d, block_idx)
+            else:
+                data_blocks.append(self.recover_failed_disks(d, block_idx))
+        data_blocks.extend(pq_blocks)
+        corrupt_blocks = set()
+        for i in range(self.block_size):
+            tmp = [data_blocks[d][i] for d in range(self.disk_num)]
+            corrupt = 0 # TODO, calculate
+            corrupt_blocks.add(corrupt)
+        return corrupt_blocks
+
+
+    def recover_corruption(self, corrupt):
+        pass # TODO

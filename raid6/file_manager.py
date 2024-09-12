@@ -1,3 +1,5 @@
+from Tools.scripts.pindent import delete_file
+
 from raid6.disk_manager import DiskManager
 
 
@@ -18,11 +20,12 @@ class FileManager:
     """
 
     def __init__(self,
-                 disk_num,
                  disk_size,
                  block_size,
+                 disks=None,
                  ):
-        self.disk_num = disk_num
+
+        self.disk_num = len(disks)
         self.disk_size = disk_size
         self.block_size = block_size
         self.block_num = disk_size // block_size
@@ -105,7 +108,13 @@ class FileManager:
 
 
     def _entry_byte_to_dict(self, b_entry, entry_disk, entry_block, entry_offset):
-        name = b_entry[0:20].decode()
+        null_idx = b_entry.find(0x0)
+        if null_idx == 0:
+            name = None
+        elif null_idx == -1:
+            name = b_entry[0:20].decode()
+        else:
+            name = b_entry[0:null_idx].decode()
         size = int.from_bytes(b_entry[20:24], byteorder='little')
         disk = int.from_bytes(b_entry[24:28], byteorder='little')
         block = int.from_bytes(b_entry[28:32], byteorder='little')
@@ -121,7 +130,7 @@ class FileManager:
 
 
     def _get_file_entry(self, file_name):
-        d, b = -1, -1
+        d, b = -1, 0
         while True:
             d += 1
             if d >= self.disk_num:
@@ -130,16 +139,21 @@ class FileManager:
             if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
                 continue
             block = self._read_block(d, b)
-            entries = [block[i:i+self._table_entry_size] for i in range(0, len(block), self._table_entry_size)]
-            for e, i in entries:
-                entry = self._entry_byte_to_dict(e, d, b, i * self._table_entry_size)
+            offset = 0
+            while offset < self.block_size:
+                entry = self._entry_byte_to_dict(
+                    block[offset:offset+self._table_entry_size], d, b, offset)
+                if entry['file_name'] is None:
+                    offset += self._table_entry_size
+                    continue
                 if file_name == entry['file_name']:
                     return entry
+                offset += self._table_entry_size
             if d == self._last_table_disk and b == self._last_table_block:
                 return None
 
     def _add_file_to_table(self, file_name, file_size, file_disk, file_block):
-        d, b = -1, -1
+        d, b = -1, 0
         while True:
             d += 1
             if d >= self.disk_num:
@@ -189,10 +203,10 @@ class FileManager:
         for i in range(self.disk_num):
             if i != self._get_p_disk(block_idx) and i != self._get_q_disk(block_idx):
                 blocks.append(self._read_block(i, block_idx))
-        block_p = []
-        for i in range(self.block_size):
-            tmp = [blocks[i][j] for j in range(self.disk_num)]
-            p = 0x12 # TODO p = cal_p(tmp)
+        block_p = bytearray()
+        for j in range(self.block_size):
+            tmp = [blocks[i][j] for i in range(len(blocks))]
+            p = 0x11  # TODO
             block_p.append(p)
         return block_p
 
@@ -202,10 +216,10 @@ class FileManager:
         for i in range(self.disk_num):
             if i != self._get_p_disk(block_idx) and i != self._get_q_disk(block_idx):
                 blocks.append(self._read_block(i, block_idx))
-        block_q = []
-        for i in range(self.block_size):
-            tmp = [blocks[i][j] for j in range(self.disk_num)]
-            q = 0x12  # TODO q = cal_q(tmp)
+        block_q = bytearray()
+        for j in range(self.block_size):
+            tmp = [blocks[i][j] for i in range(len(blocks))]
+            q = 0x12  # TODO
             block_q.append(q)
         return block_q
 
@@ -222,32 +236,41 @@ class FileManager:
             return None
         data = bytearray()
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
-        while True:
+        has_next = True
+        while has_next:
             block = self._read_block(disk_idx, block_idx)
             size = self._block_get_size(block)
             if size == 0:
                 break
             data.extend(self._block_get_data(block, size))
-            if size <= self.data_size:
-                break
-            disk_idx = self._block_get_next_disk(block)
-            block_idx = self._block_get_next_block(block)
+            next_disk = self._block_get_next_disk(block)
+            next_block = self._block_get_next_block(block)
+            has_next = disk_idx != next_disk or block_idx != next_block
+            disk_idx, block_idx = next_disk, next_block
         return data
 
 
     def add_file(self, file_name, b_data):
+        tmp = self._next_available_block(self._last_table_disk, self._last_table_block)
+        if tmp is None:
+            return -1
+        disk_idx, block_idx = tmp
+        res = self._add_file_to_table(file_name, len(b_data), disk_idx, block_idx)
+        if res != 0:
+            return -1
         offset = 0
-        disk_idx, block_idx = self._next_available_block(
-            self._last_table_disk, self._last_table_block)
-        self._add_file_to_table(file_name, len(b_data), disk_idx, block_idx)
         while offset < len(b_data):
             if len(b_data) - offset > self.data_size:
-                next_disk, next_block = self._next_available_block(disk_idx, block_idx)
+                tmp = self._next_available_block(disk_idx, block_idx)
+                if tmp is None:
+                    self.del_file(file_name)
+                    return -1
+                next_disk, next_block = tmp
                 block = bytearray()
                 block.extend(self.data_size.to_bytes(4, 'little'))
                 block.extend(next_disk.to_bytes(4, 'little'))
                 block.extend(next_block.to_bytes(4, 'little'))
-                block.extend(b_data[offset:self.data_size])
+                block.extend(b_data[offset:offset+self.data_size])
                 self._write_block(block, disk_idx, block_idx)
                 self._reset_pq(block_idx)
                 disk_idx, block_idx = next_disk, next_block
@@ -262,7 +285,7 @@ class FileManager:
                 self._write_block(block, disk_idx, block_idx)
                 self._reset_pq(block_idx)
                 offset = len(b_data)
-
+        return 0
 
     def del_file(self, file_name):
         file_entry = self._get_file_entry(file_name)
@@ -278,8 +301,11 @@ class FileManager:
             data = bytearray(b'\x00' * self.block_size)
             self._write_block(data, disk_idx, block_idx)
             self._reset_pq(block_idx)
-            if size > self.data_size:
-                disk_idx, block_idx = next_disk, next_block
+            if size == 0:
+                break
+            if disk_idx == next_disk and block_idx == next_block:
+                break
+            disk_idx, block_idx = next_disk, next_block
 
 
     def modify_file(self, file_name, offset, b_data):
@@ -310,6 +336,30 @@ class FileManager:
                 break
             disk_idx = self._block_get_next_disk(block)
             block_idx = self._block_get_next_block(block)
+
+    def list_files(self):
+        d, b = -1, 0
+        entries = []
+        has_next = True
+        while has_next:
+            d += 1
+            if d == self.disk_num:
+                d = 0
+                b += 1
+            if d == self._last_table_disk and b == self._last_table_block:
+                has_next = False
+            block = self._read_block(d, b)
+            offset = 0
+            while offset < self.block_size:
+                entry = self._entry_byte_to_dict(block[offset:offset+self._table_entry_size], d, b, offset)
+                if entry['file_name'] is not None:
+                    entries.append(entry)
+                offset += self._table_entry_size
+        return entries
+
+
+    def clear_disk(self, disk_idx):
+        self.disk_manager.clear_disk(disk_idx)
 
 
     def check_disk(self, disk_idx):
@@ -371,3 +421,31 @@ class FileManager:
 
     def recover_corruption(self, corrupt):
         pass # TODO
+
+if __name__ == '__main__':
+    f = FileManager(
+        disk_size=1024 * 1024,
+        block_size=64 * 1024,
+        disks=[
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+    ])
+    for i in range(6):
+        f.clear_disk(i)
+    with open('./test/1.jpg', 'rb') as file:
+        data1 = file.read()
+        f.add_file('1.jpg', data1)
+    with open('./test/2.jpg', 'rb') as file:
+        data2 = file.read()
+        f.add_file('2.jpg', data2)
+
+    f.del_file('1.jpg')
+    f.add_file('1.jpg', data1)
+    for e in f.list_files():
+        print(e)
+    print(f.read_file('1.jpg') == data1)
+    print(f.read_file('2.jpg') == data2)

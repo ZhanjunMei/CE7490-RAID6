@@ -66,3 +66,6 @@ class DiskManager:
                     return bytearray(file.read())
             else:
                 return bytearray(b'\x00' * self.block_size)
+
+if __name__ == '__main__':
+    pass

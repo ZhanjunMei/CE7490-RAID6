@@ -162,7 +162,7 @@ if __name__ == "__main__" :
     GF = Galoisfield256()
     for i in range(256):
         for j in range(256):
-            if GF_vm.gf_power(i,j) != GF.power(i,j) and i!=0:
+            if (GF_vm.gf_power(i,j) != GF.power(i,j)) and (i!=0) and (j!=0):
                 print(666)
                 print("something wrong!")
                 print("i:",i)

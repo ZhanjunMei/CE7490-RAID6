@@ -1,5 +1,3 @@
-from Tools.scripts.pindent import delete_file
-
 from raid6.disk_manager import DiskManager
 
 
@@ -34,6 +32,7 @@ class FileManager:
         # disk_manager
         self.disk_manager = DiskManager(disk_size, block_size)
         # file_table
+        self._max_file_blocks = 0
         self._last_table_disk = 0
         self._last_table_block = 0
         self._table_entry_size = 32
@@ -45,6 +44,7 @@ class FileManager:
         max_table_blocks = max_entry_size // self.block_size
         if max_entry_size % self.block_size != 0:
             max_table_blocks += 1
+        self._max_file_blocks = max_file_num - max_table_blocks
         res = max_table_blocks % (self.disk_num - 2)
         self._last_table_block = max_table_blocks // (self.disk_num - 2)
         if res == 0:
@@ -108,7 +108,7 @@ class FileManager:
 
 
     def _entry_byte_to_dict(self, b_entry, entry_disk, entry_block, entry_offset):
-        null_idx = b_entry.find(0x0)
+        null_idx = b_entry.find(b'\x00')
         if null_idx == 0:
             name = None
         elif null_idx == -1:
@@ -152,9 +152,10 @@ class FileManager:
             if d == self._last_table_disk and b == self._last_table_block:
                 return None
 
+
     def _add_file_to_table(self, file_name, file_size, file_disk, file_block):
         d, b = -1, 0
-        while True:
+        while d != self._last_table_disk or b != self._last_table_block:
             d += 1
             if d >= self.disk_num:
                 d = 0
@@ -177,8 +178,7 @@ class FileManager:
                 self._write_block(block, d, b)
                 self._reset_pq(b)
                 return 0
-            if d == self._last_table_disk and b == self._last_table_block:
-                return -1
+        return -1
 
 
     def _del_file_from_table(self, file_entry):
@@ -229,6 +229,23 @@ class FileManager:
         block_q = self._cal_block_q(block_idx)
         self._write_block(block_q, self._get_q_disk(block_idx), block_idx)
 
+    def _available_to_add_file(self, file_name, file_size):
+        entries = self.list_files()
+        occupied_blocks = 0
+        for e in entries:
+            if e['file_name'] == file_name:
+                return -2
+            blocks = e['file_size'] // self.block_size
+            if blocks * self.block_size != e['file_size']:
+                blocks += 1
+            occupied_blocks += blocks
+        new_blocks = file_size // self.block_size
+        if new_blocks * self.block_size != file_size:
+            new_blocks += 1
+        if occupied_blocks + new_blocks > self._max_file_blocks:
+            return -1
+        return 0
+
 
     def read_file(self, file_name):
         file_entry = self._get_file_entry(file_name)
@@ -251,10 +268,13 @@ class FileManager:
 
 
     def add_file(self, file_name, b_data):
-        tmp = self._next_available_block(self._last_table_disk, self._last_table_block)
-        if tmp is None:
+        res = self._available_to_add_file(file_name, len(b_data))
+        if res != 0:
+            return res
+        res = self._next_available_block(self._last_table_disk, self._last_table_block)
+        if res is None:
             return -1
-        disk_idx, block_idx = tmp
+        disk_idx, block_idx = res
         res = self._add_file_to_table(file_name, len(b_data), disk_idx, block_idx)
         if res != 0:
             return -1
@@ -286,6 +306,7 @@ class FileManager:
                 self._reset_pq(block_idx)
                 offset = len(b_data)
         return 0
+
 
     def del_file(self, file_name):
         file_entry = self._get_file_entry(file_name)
@@ -337,17 +358,17 @@ class FileManager:
             disk_idx = self._block_get_next_disk(block)
             block_idx = self._block_get_next_block(block)
 
+
     def list_files(self):
         d, b = -1, 0
         entries = []
-        has_next = True
-        while has_next:
+        while d != self._last_table_disk or b != self._last_table_block :
             d += 1
             if d == self.disk_num:
                 d = 0
                 b += 1
-            if d == self._last_table_disk and b == self._last_table_block:
-                has_next = False
+            if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
+                continue
             block = self._read_block(d, b)
             offset = 0
             while offset < self.block_size:
@@ -378,10 +399,6 @@ class FileManager:
                 if d == d0 or d == d1:
                     continue
                 blocks[d] = self._read_block(d, b)
-            p_block = blocks.pop(p_idx)
-            q_block = blocks.pop(q_idx)
-            blocks.append(p_block)
-            blocks.append(q_block)
             d0_block, d1_block = bytearray(), bytearray()
             for i in range(self.block_size):
                 tmp = []
@@ -422,30 +439,71 @@ class FileManager:
     def recover_corruption(self, corrupt):
         pass # TODO
 
-if __name__ == '__main__':
-    f = FileManager(
-        disk_size=1024 * 1024,
-        block_size=64 * 1024,
-        disks=[
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-    ])
-    for i in range(6):
-        f.clear_disk(i)
-    with open('./test/1.jpg', 'rb') as file:
-        data1 = file.read()
-        f.add_file('1.jpg', data1)
-    with open('./test/2.jpg', 'rb') as file:
-        data2 = file.read()
-        f.add_file('2.jpg', data2)
 
-    f.del_file('1.jpg')
-    f.add_file('1.jpg', data1)
-    for e in f.list_files():
-        print(e)
-    print(f.read_file('1.jpg') == data1)
-    print(f.read_file('2.jpg') == data2)
+if __name__ == '__main__':
+    disk_size = 4 * 1024 * 1024
+    block_size = 16 * 1024
+    disks = [
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+    ]
+
+    file_manager = FileManager(disk_size, block_size, disks)
+    for i in range(len(disks)):
+        file_manager.clear_disk(i)
+
+    import random, os
+    random.seed(123)
+    test_files = [os.path.join('./test/', x) for x in os.listdir('./test')]
+    exe_steps = random.randint(500, 500)
+    os_files = set()
+    for i in range(exe_steps):
+        op = random.randint(0, 2)
+        if op == 0:
+            if i == 19:
+                pass
+            add_file = test_files[random.randint(0, len(test_files) - 1)]
+            print(i, 'add', add_file)
+            os_files.add(add_file)
+            with open(add_file, 'rb') as fread:
+                file_manager.add_file(add_file, fread.read())
+            ls = set([x['file_name'] for x in file_manager.list_files()])
+            if os_files != ls:
+                print('error!')
+                print('--- os_files ---')
+                print(os_files)
+                print('--- ls ---')
+                print(ls)
+                break
+
+        elif op == 1:
+            del_file = test_files[random.randint(0, len(test_files) - 1)]
+            print(i, 'del', del_file)
+            if del_file in os_files:
+                os_files.remove(del_file)
+            file_manager.del_file(del_file)
+            ls = set([x['file_name'] for x in file_manager.list_files()])
+            if os_files != ls:
+                print('error!')
+                print('--- os_files ---')
+                print(os_files)
+                print('--- ls ---')
+                print(ls)
+                break
+
+        elif op == 2:
+            read_file = test_files[random.randint(0, len(test_files) - 1)]
+            print(i, 'read', read_file)
+            if read_file in os_files:
+                with open(read_file, 'rb') as fread:
+                    d0 = fread.read()
+            else:
+                d0 = None
+            d1 = file_manager.read_file(read_file)
+            if d0 != d1:
+                print('error!')
+                break

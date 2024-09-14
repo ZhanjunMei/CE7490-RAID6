@@ -27,8 +27,8 @@ class FileManager:
         self.disk_size = disk_size
         self.block_size = block_size
         self.block_num = disk_size // block_size
-        self.head_size = 12
-        self.data_size = self.block_size - self.head_size
+        self.block_head_size = 12
+        self.block_data_size = self.block_size - self.block_head_size
         # disk_manager
         self.disk_manager = DiskManager(disk_size, block_size)
         # file_table
@@ -229,7 +229,7 @@ class FileManager:
         block_q = self._cal_block_q(block_idx)
         self._write_block(block_q, self._get_q_disk(block_idx), block_idx)
 
-    def _available_to_add_file(self, file_name, file_size):
+    def _able_to_add_file(self, file_name, file_size):
         entries = self.list_files()
         occupied_blocks = 0
         for e in entries:
@@ -247,10 +247,37 @@ class FileManager:
         return 0
 
 
-    def read_file(self, file_name):
-        file_entry = self._get_file_entry(file_name)
+    def _able_to_modify_file(self, file_name, begin, end, new_size):
+        if begin > end:
+            return -1, None
+        entries = self.list_files()
+        occupied_blocks = 0
+        entry = None
+        for e in entries:
+            if e['file_name'] == file_name:
+                if begin < 0 or begin > e['file_size'] or end < 0 or end > e['file_size']:
+                    return -1, None
+                size_change = new_size - (end - begin)
+                if size_change == 0:
+                    return 0, e
+                f_size = e['file_size'] + size_change
+                entry = e
+            else:
+                f_size = e['file_size']
+            blocks = f_size // self.block_size
+            if blocks * self.block_size != f_size:
+                blocks += 1
+            occupied_blocks += blocks
+        if occupied_blocks > self._max_file_blocks or entry is None:
+            return -1, None
+        return 0, entry
+
+
+    def read_file(self, file_name, file_entry=None):
         if file_entry is None:
-            return None
+            file_entry = self._get_file_entry(file_name)
+            if file_entry is None:
+                return None
         data = bytearray()
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
         has_next = True
@@ -268,7 +295,7 @@ class FileManager:
 
 
     def add_file(self, file_name, b_data):
-        res = self._available_to_add_file(file_name, len(b_data))
+        res = self._able_to_add_file(file_name, len(b_data))
         if res != 0:
             return res
         res = self._next_available_block(self._last_table_disk, self._last_table_block)
@@ -280,28 +307,28 @@ class FileManager:
             return -1
         offset = 0
         while offset < len(b_data):
-            if len(b_data) - offset > self.data_size:
+            if len(b_data) - offset > self.block_data_size:
                 tmp = self._next_available_block(disk_idx, block_idx)
                 if tmp is None:
                     self.del_file(file_name)
                     return -1
                 next_disk, next_block = tmp
                 block = bytearray()
-                block.extend(self.data_size.to_bytes(4, 'little'))
+                block.extend(self.block_data_size.to_bytes(4, 'little'))
                 block.extend(next_disk.to_bytes(4, 'little'))
                 block.extend(next_block.to_bytes(4, 'little'))
-                block.extend(b_data[offset:offset+self.data_size])
+                block.extend(b_data[offset:offset+self.block_data_size])
                 self._write_block(block, disk_idx, block_idx)
                 self._reset_pq(block_idx)
                 disk_idx, block_idx = next_disk, next_block
-                offset += self.data_size
+                offset += self.block_data_size
             else:
                 block = bytearray()
                 block.extend((len(b_data) - offset).to_bytes(4, 'little'))
                 block.extend(disk_idx.to_bytes(4, 'little'))
                 block.extend(block_idx.to_bytes(4, 'little'))
                 block.extend(b_data[offset:])
-                block.extend(b'\x00' * (self.data_size - len(b_data) + offset))
+                block.extend(b'\x00' * (self.block_data_size - len(b_data) + offset))
                 self._write_block(block, disk_idx, block_idx)
                 self._reset_pq(block_idx)
                 offset = len(b_data)
@@ -329,34 +356,42 @@ class FileManager:
             disk_idx, block_idx = next_disk, next_block
 
 
-    def modify_file(self, file_name, offset, b_data):
-        if len(b_data) == 0:
-            return
-        file_entry = self._get_file_entry(file_name)
-        if file_entry is None:
-            return
+    def modify_file(self, file_name, begin, end, b_data):
+        res = self._able_to_modify_file(file_name, begin, end, len(b_data))
+        if res[0] != 0 or res[1] is None:
+            return res[0]
+        file_entry = res[1]
         file_size = file_entry['file_size']
-        if offset + b_data != file_size:
+        # change the file size
+        if len(b_data) != end - begin:
+            f_data = self.read_file(file_name, file_entry)
+            new_data = bytearray()
+            new_data.extend(f_data[0:begin])
+            new_data.extend(b_data)
+            new_data.extend(f_data[end:file_size])
             self.del_file(file_name)
-            self.add_file(file_name, b_data)
-            return
-        current_offset = 0
+            return self.add_file(file_name, new_data)
+        # keep the same size
+        if begin == end:
+            return 0
+        offset = 0
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
-        while True:
+        while offset <= end:
             block = self._read_block(disk_idx, block_idx)
-            size = self._block_get_size(block)
-            if current_offset + size < offset:
+            if offset + self.block_data_size <= begin:
+                offset += self.block_data_size
+                disk_idx = self._block_get_next_disk(block)
+                block_idx = self._block_get_next_block(block)
                 continue
-            data_len = min(self.data_size, len(b_data) - current_offset)
-            mini_offset = (current_offset - offset) % self.data_size
-            block[mini_offset:mini_offset+data_len] = b_data[current_offset:current_offset+data_len]
+            block_start = self.block_head_size + max(begin - offset, 0)
+            data_start = max(offset - begin, 0)
+            data_size = min(end - offset, self.block_data_size) - max(begin - offset, 0)
+            block[block_start:block_start+data_size] = b_data[data_start:data_start+data_size]
             self._write_block(block, disk_idx, block_idx)
             self._reset_pq(block_idx)
-            current_offset += data_len
-            if current_offset >= offset + len(b_data):
-                break
             disk_idx = self._block_get_next_disk(block)
             block_idx = self._block_get_next_block(block)
+            offset += self.block_data_size
 
 
     def list_files(self):
@@ -441,8 +476,8 @@ class FileManager:
 
 
 if __name__ == '__main__':
-    disk_size = 4 * 1024 * 1024
-    block_size = 16 * 1024
+    disk_size = 20 * 1024 * 1024
+    block_size = 64 * 1024
     disks = [
         ('f', './disks/'),
         ('f', './disks/'),
@@ -456,35 +491,57 @@ if __name__ == '__main__':
     for i in range(len(disks)):
         file_manager.clear_disk(i)
 
-    import random, os
-    random.seed(123)
+    import random, os, shutil
+    random.seed(0)
+    shutil.make_archive('./test', 'zip', './test/')
     test_files = [os.path.join('./test/', x) for x in os.listdir('./test')]
-    exe_steps = random.randint(500, 500)
+    exe_steps = 500
     os_files = set()
+    out_files = set(test_files)
     for i in range(exe_steps):
-        op = random.randint(0, 2)
-        if op == 0:
-            if i == 19:
-                pass
-            add_file = test_files[random.randint(0, len(test_files) - 1)]
-            print(i, 'add', add_file)
+        op = random.random()
+
+        # add_file
+        if op < 0.2:
+            if len(out_files) == 0:
+                add_file = list(os_files)[random.randint(0, len(os_files) - 1)]
+            else:
+                if random.random() < 0.8 or len(os_files) == 0:
+                    add_file = list(out_files)[random.randint(0, len(out_files) - 1)]
+                else:
+                    add_file = list(os_files)[random.randint(0, len(os_files) - 1)]
             os_files.add(add_file)
+            if add_file in out_files:
+                out_files.remove(add_file)
+            print(i, 'add', add_file)
             with open(add_file, 'rb') as fread:
-                file_manager.add_file(add_file, fread.read())
+                d0 = fread.read()
+            file_manager.add_file(add_file, d0)
+            d1 = file_manager.read_file(add_file)
             ls = set([x['file_name'] for x in file_manager.list_files()])
-            if os_files != ls:
+            if os_files != ls or d0 != d1:
                 print('error!')
                 print('--- os_files ---')
                 print(os_files)
                 print('--- ls ---')
                 print(ls)
+                if d0 != d1:
+                    print('--- d0 != d1 ---')
                 break
 
-        elif op == 1:
-            del_file = test_files[random.randint(0, len(test_files) - 1)]
-            print(i, 'del', del_file)
+        # delete file
+        elif op < 0.4:
+            if len(os_files) == 0:
+                del_file = list(out_files)[random.randint(0, len(out_files) - 1)]
+            else:
+                if random.random() < 0.8 or len(out_files) == 0:
+                    del_file = list(os_files)[random.randint(0, len(os_files) - 1)]
+                else:
+                    del_file = list(out_files)[random.randint(0, len(out_files) - 1)]
             if del_file in os_files:
                 os_files.remove(del_file)
+            out_files.add(del_file)
+            print(i, 'del', del_file)
             file_manager.del_file(del_file)
             ls = set([x['file_name'] for x in file_manager.list_files()])
             if os_files != ls:
@@ -495,8 +552,15 @@ if __name__ == '__main__':
                 print(ls)
                 break
 
-        elif op == 2:
-            read_file = test_files[random.randint(0, len(test_files) - 1)]
+        # read file
+        elif op < 0.6:
+            if len(os_files) == 0:
+                read_file = list(out_files)[random.randint(0, len(out_files) - 1)]
+            else:
+                if random.random() < 0.8 or len(out_files) == 0:
+                    read_file = list(os_files)[random.randint(0, len(os_files) - 1)]
+                else:
+                    read_file = list(out_files)[random.randint(0, len(out_files) - 1)]
             print(i, 'read', read_file)
             if read_file in os_files:
                 with open(read_file, 'rb') as fread:
@@ -507,3 +571,58 @@ if __name__ == '__main__':
             if d0 != d1:
                 print('error!')
                 break
+
+        # modify file
+        elif op < 1:
+            if len(os_files) == 0:
+                modify_file = list(out_files)[random.randint(0, len(out_files) - 1)]
+            else:
+                if random.random() < 0.8 or len(out_files) == 0:
+                    modify_file = list(os_files)[random.randint(0, len(os_files) - 1)]
+                else:
+                    modify_file = list(out_files)[random.randint(0, len(out_files) - 1)]
+            print(i, 'modify', modify_file)
+            if modify_file not in os_files:
+                begin, end = 10, 20
+                new_data = bytearray(os.urandom(10))
+                d1 = None
+            else:
+                with open(modify_file, 'rb') as fm:
+                    d0 = fm.read()
+                t = random.random()
+                if t < 0.1:
+                    begin = end = random.randint(0, len(d0))
+                elif t < 0.3:
+                    if random.random() < 0.5:
+                        begin, end = 0, random.randint(0, len(d0))
+                    else:
+                        begin, end = random.randint(0, len(d0)), len(d0)
+                else:
+                    begin = random.randint(0, len(d0))
+                    end = random.randint(begin, len(d0))
+                if random.random() < 0.7:
+                    new_data = bytearray(os.urandom(end - begin))
+                else:
+                    new_len = random.randint(0, len(d0) + 3 * block_size)
+                    new_data = bytearray(os.urandom(new_len))
+                d1 = bytearray()
+                d1.extend(d0[0:begin])
+                d1.extend(new_data)
+                d1.extend(d0[end:])
+                with open(modify_file, 'wb') as fm:
+                    fm.write(d1)
+            file_manager.modify_file(modify_file, begin, end, new_data)
+            d2 = file_manager.read_file(modify_file)
+            if d1 != d2:
+                print('error!')
+                print('--- os files ---')
+                print(os_files)
+                print('--- ls ---')
+                print(file_manager.list_files())
+                print('--- begin, end, file_len, new_len ---')
+                print(begin, end, -1 if d1 is None else len(d1), len(new_data))
+                break
+
+    shutil.rmtree('./test/')
+    shutil.unpack_archive('./test.zip', './test/')
+    os.remove('./test.zip')

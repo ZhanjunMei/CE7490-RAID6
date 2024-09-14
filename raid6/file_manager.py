@@ -23,7 +23,15 @@ class FileManager:
                  max_file_num=None,
                  disks=None,
                  ):
-
+        if disks is None:
+            disks = [
+                ('f', './disks/'),
+                ('f', './disks/'),
+                ('f', './disks/'),
+                ('f', './disks/'),
+                ('f', './disks/'),
+                ('f', './disks/'),
+            ]
         self.disk_num = len(disks)
         self.disk_size = disk_size
         self.block_size = block_size
@@ -31,7 +39,7 @@ class FileManager:
         self.block_head_size = 12
         self.block_data_size = self.block_size - self.block_head_size
         # disk_manager
-        self.disk_manager = DiskManager(disk_size, block_size)
+        self.disk_manager = DiskManager(disk_size, block_size, disks)
         # file_table
         self._max_file_blocks = 0
         self._last_table_disk = 0
@@ -489,6 +497,10 @@ if __name__ == '__main__':
         ('f', './disks/'),
         ('f', './disks/'),
         ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
     ]
 
     file_manager = FileManager(disk_size, block_size, max_file_num, disks)
@@ -499,7 +511,7 @@ if __name__ == '__main__':
     random.seed(0)
     shutil.make_archive('./test', 'zip', './test/')
     test_files = [os.path.join('./test/', x) for x in os.listdir('./test')]
-    exe_steps = 500
+    exe_steps = 300
     os_files = set()
     out_files = set(test_files)
     for i in range(exe_steps):

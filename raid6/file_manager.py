@@ -20,6 +20,7 @@ class FileManager:
     def __init__(self,
                  disk_size,
                  block_size,
+                 max_file_num=None,
                  disks=None,
                  ):
 
@@ -36,15 +37,17 @@ class FileManager:
         self._last_table_disk = 0
         self._last_table_block = 0
         self._table_entry_size = 32
-        self._init_file_table()
+        self._init_file_table(max_file_num)
 
-    def _init_file_table(self):
+    def _init_file_table(self, max_files):
         max_file_num = (self.disk_num - 2) * (self.disk_size // self.block_size)
+        if max_files is not None:
+            max_file_num = min(max_files, max_file_num)
         max_entry_size = max_file_num * self._table_entry_size
         max_table_blocks = max_entry_size // self.block_size
         if max_entry_size % self.block_size != 0:
             max_table_blocks += 1
-        self._max_file_blocks = max_file_num - max_table_blocks
+        self._max_file_blocks = (self.disk_num - 2) * (self.disk_size // self.block_size) - max_table_blocks
         res = max_table_blocks % (self.disk_num - 2)
         self._last_table_block = max_table_blocks // (self.disk_num - 2)
         if res == 0:
@@ -478,6 +481,7 @@ class FileManager:
 if __name__ == '__main__':
     disk_size = 20 * 1024 * 1024
     block_size = 64 * 1024
+    max_file_num = 10
     disks = [
         ('f', './disks/'),
         ('f', './disks/'),
@@ -487,7 +491,7 @@ if __name__ == '__main__':
         ('f', './disks/'),
     ]
 
-    file_manager = FileManager(disk_size, block_size, disks)
+    file_manager = FileManager(disk_size, block_size, max_file_num, disks)
     for i in range(len(disks)):
         file_manager.clear_disk(i)
 

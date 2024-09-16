@@ -160,13 +160,14 @@ class GaloisField(object):
 if __name__ == "__main__" :
     GF_vm = GaloisField(100,100)
     GF = Galoisfield256()
-    for i in range(256):
-        for j in range(256):
-            if (GF_vm.gf_power(i,j) != GF.power(i,j)) and (i!=0) and (j!=0):
-                print(666)
-                print("something wrong!")
-                print("i:",i)
-                print("j:",j)
-                print("VM res:",GF_vm.gf_power(i,j))
-                print("my_res:",GF.power(i,j))
+    # for i in range(256):
+    for j in range(256):
+        print(GF.multiply(j,GF.inverse(j)))
+            # if (GF_vm.gf_mul(i,j) != GF.multiply(i,j)) and (i!=0) and (j!=0):
+            #     print(666)
+            #     print("something wrong!")
+            #     print("i:",i)
+            #     print("j:",j)
+            #     print("VM res:",GF_vm.gf_power(i,j))
+            #     print("my_res:",GF.power(i,j))
     

@@ -1,6 +1,5 @@
-from configparser import Error
-
 from raid6.disk_manager import DiskManager
+from raid6.fault_tolerance import failure_fix, corruption_check_fix, compute_PQ
 
 
 class FileManager:
@@ -203,89 +202,126 @@ class FileManager:
         self._reset_pq(b)
 
 
+    def _recover_strides_from_failure(self, blocks, failed_idx):
+        if len(failed_idx) == 1:
+            new_blocks = [bytearray()]
+            for i in range(self.block_size):
+                arr = [blocks[d][i] for d in range(len(blocks))]
+                recover = failure_fix(arr, failed_idx)
+                new_blocks[0].append(recover[0])
+            return new_blocks
+        elif len(failed_idx) == 2:
+            new_blocks = [bytearray(), bytearray()]
+            for i in range(self.block_size):
+                arr = [blocks[d][i] for d in range(len(blocks))]
+                recover = failure_fix(arr, failed_idx)
+                new_blocks[0].append(recover[0])
+                new_blocks[1].append(recover[1])
+            return new_blocks
+
+
+    def _recover_blocks_from_failure(self, blocks, failed_disks):
+        if len(failed_disks) == 1:
+            new_blocks = [bytearray()]
+            for i in range(self.block_size):
+                arr = [blocks[d][i] for d in range(len(blocks))]
+                recover = failure_fix(arr, failed_disks)
+                new_blocks[0].append(recover[0])
+            return new_blocks
+        elif len(failed_disks) == 2:
+            new_blocks = [bytearray(), bytearray()]
+            for i in range(self.block_size):
+                arr = [blocks[d][i] for d in range(len(blocks))]
+                recover = failure_fix(arr, failed_disks)
+                new_blocks[0].append(recover[0])
+                new_blocks[1].append(recover[1])
+            return new_blocks
+
+
+    def _recover_stripe_from_failure(self, block_idx):
+        p_idx, q_idx = self._get_p_disk(block_idx), self._get_q_disk(block_idx)
+        block_stride, pq_blocks = [], [None, None]
+        failed_disks = []
+        for d in range(self.disk_num):
+            if self.disk_manager.check_block(d, block_idx) != 0:
+                failed_disks.append(d)
+                if len(failed_disks) > 2:
+                    raise Exception('Failure in more than 2 disks of a stripe!')
+        if len(failed_disks) == 0:
+            return
+        for d in range(self.disk_num):
+            if d not in failed_disks:
+                block_data = self.disk_manager.read_block(d, block_idx)
+            else:
+                block_data = bytearray('\x00' * self.block_size)
+            if d == p_idx:
+                pq_blocks[0] = block_data
+            elif d == q_idx:
+                pq_blocks[1] = block_data
+            else:
+                block_stride.append(block_data)
+        block_stride.extend(pq_blocks)
+        res = self._recover_blocks_from_failure(block_stride, failed_disks)
+        self._write_block(res[0], failed_disks[0], block_idx)
+        if len(failed_disks) == 2:
+            self._write_block(res[1], failed_disks[1], block_idx)
+
+
     def _recover_from_failure(self, block_idx):
         failed_disks = []
         for i in range(self.disk_num):
             if self.disk_manager.check_disk(i) != 0:
                 failed_disks.append(i)
                 if len(failed_disks) > 2:
-                    raise Error('Failure in more than 2 disks!')
+                    raise Exception('Failure in more than 2 disks!')
         if len(failed_disks) > 0:
             for b in range(self.block_num):
-                block_data = []
-                failed_block_disk_idx = []
-                for d in range(self.disk_num):
-                    if d in failed_disks or self.disk_manager.check_block(d, b) != 0:
-                        failed_block_disk_idx.append(d)
-                        if len(failed_block_disk_idx) > 2:
-                            raise Error('Failure in more than 2 blocks in a same stride')
-                for d in range(self.disk_num):
-                    if d not in failed_block_disk_idx:
-                        block_data.append(self._read_block(d, b))
-                    else:
-                        block_data.append(bytearray('\x00' * self.block_size))
-                # TODO recover
+                self._recover_stripe_from_failure(b)
         else:
-            block_data = []
-            failed_block_disk_idx = []
-            for d in range(self.disk_num):
-                if d in failed_disks or self.disk_manager.check_block(d, block_idx) != 0:
-                    failed_block_disk_idx.append(d)
-                    if len(failed_block_disk_idx) > 2:
-                        raise Error('Failure in more than 2 blocks in a same stride')
-            for d in range(self.disk_num):
-                if d not in failed_block_disk_idx:
-                    block_data.append(self._read_block(d, block_idx))
-                else:
-                    block_data.append(bytearray('\x00' * self.block_size))
-            # TODO recover
+            self._recover_stripe_from_failure(block_idx)
 
 
-    def _read_block(self, disk_idx, block_idx):
+    def _read_block(self, disk_idx, block_idx, no_failure=False):
         res, data = self.disk_manager.read_block(disk_idx, block_idx)
-        while res != 0:
+        if res != 0:
+            if no_failure:
+                raise Exception('Unable to handle failure!')
             self._recover_from_failure(block_idx)
             res, data = self.disk_manager.read_block(disk_idx, block_idx)
+            if res != 0:
+                raise Exception('Unable to handle failure after recovery!')
         return data
 
 
-    def _write_block(self, block, disk_idx, block_idx):
+    def _write_block(self, block, disk_idx, block_idx, no_failure=False):
         res = self.disk_manager.write_block(block, disk_idx, block_idx)
-        while res != 0:
+        if res != 0:
+            if no_failure:
+                raise Exception('Unable to handle failure!')
             self._recover_from_failure(block_idx)
             res = self.disk_manager.write_block(block, disk_idx, block_idx)
-        return 0
+            if res != 0:
+                raise Exception('Unable to handle failure after recovery!')
+        return res
 
 
-    def _cal_block_p(self, block_idx):
+    def _cal_block_pq(self, block_idx):
         blocks = []
         for i in range(self.disk_num):
             if i != self._get_p_disk(block_idx) and i != self._get_q_disk(block_idx):
                 blocks.append(self._read_block(i, block_idx))
-        block_p = bytearray()
+        block_p, block_q = bytearray(), bytearray()
         for j in range(self.block_size):
-            tmp = [blocks[i][j] for i in range(len(blocks))]
-            p = 0x11  # TODO
-            block_p.append(p)
-        return block_p
+            arr = [blocks[i][j] for i in range(len(blocks))]
+            res = compute_PQ(arr)
+            block_p.append(res[0])
+            block_q.append(res[1])
+        return block_p, block_q
 
-
-    def _cal_block_q(self, block_idx):
-        blocks = []
-        for i in range(self.disk_num):
-            if i != self._get_p_disk(block_idx) and i != self._get_q_disk(block_idx):
-                blocks.append(self._read_block(i, block_idx))
-        block_q = bytearray()
-        for j in range(self.block_size):
-            tmp = [blocks[i][j] for i in range(len(blocks))]
-            q = 0x12  # TODO
-            block_q.append(q)
-        return block_q
 
     def _reset_pq(self, block_idx):
-        block_p = self._cal_block_p(block_idx)
+        block_p, block_q = self._cal_block_pq(block_idx)
         self._write_block(block_p, self._get_p_disk(block_idx), block_idx)
-        block_q = self._cal_block_q(block_idx)
         self._write_block(block_q, self._get_q_disk(block_idx), block_idx)
 
     def _able_to_add_file(self, file_name, file_size):
@@ -478,34 +514,50 @@ class FileManager:
 
 
     def check_corrupt(self, block_idx):
-        pass
-        # data_blocks = []
-        # pq_blocks = [None, None]
-        # p_idx = self._get_p_disk(block_idx)
-        # q_idx = self._get_q_disk(block_idx)
-        # for d in range(self.disk_num):
-        #     if d == p_idx:
-        #         pq_blocks[0] = self._read_block(d, block_idx)
-        #     elif d == q_idx:
-        #         pq_blocks[1] = self._read_block(d, block_idx)
-        #     else:
-        #         data_blocks.append(self.recover_failed_disks(d, block_idx))
-        # data_blocks.extend(pq_blocks)
-        # corrupt_blocks = set()
-        # for i in range(self.block_size):
-        #     tmp = [data_blocks[d][i] for d in range(self.disk_num)]
-        #     corrupt = 0 # TODO, calculate
-        #     corrupt_blocks.add(corrupt)
-        # return corrupt_blocks
-
-
-    def recover_corruption(self, corrupt):
-        pass # TODO
+        block_stripe, pq_blocks = [], [None, None]
+        p_idx, q_idx = self._get_p_disk(block_idx), self._get_q_disk(block_idx)
+        for d in range(self.disk_num):
+            block_data = self._read_block(d, block_idx, no_failure=True)
+            if d == p_idx:
+                pq_blocks[0] = block_data
+            elif d == q_idx:
+                pq_blocks[1] = block_data
+            else:
+                block_stripe.append(block_data)
+        block_stripe.extend(pq_blocks)
+        corrupted_disk, recover_entries, recover_block = -1, [], bytearray()
+        for i in range(self.block_size):
+            arr = [block_stripe[d][i] for d in range(self.disk_num)]
+            res_disk, res_data = corruption_check_fix(arr)
+            if res_disk < 0:
+                continue
+            if corrupted_disk == -1:
+                corrupted_disk = res_disk
+            elif corrupted_disk != res_disk:
+                raise Exception('More than 1 block corrupted in a stripe!')
+            recover_entries.append((i, res_data))
+        if corrupted_disk == -1:
+            return
+        if corrupted_disk == p_idx or corrupted_disk == q_idx:
+            pass
+        elif p_idx == self.disk_num - 1:
+            corrupted_disk += 1
+        elif corrupted_disk > p_idx:
+            corrupted_disk += 2
+        corrupted_data = self._read_block(corrupted_disk, block_idx, no_failure=True)
+        t = 0
+        for i in range(self.block_size):
+            if t >= len(recover_entries) or i < recover_entries[t][0]:
+                recover_block.append(corrupted_data[i])
+            else:
+                recover_block.append(recover_entries[t][1])
+                t += 1
+        self._write_block(recover_block, corrupted_disk, block_idx, no_failure=True)
 
 
 if __name__ == '__main__':
-    disk_size = 20 * 1024 * 1024
-    block_size = 64 * 1024
+    disk_size = 5 * 1024 * 1024
+    block_size = 4 * 1024
     max_file_num = 10
     disks = [
         ('f', './disks/'),

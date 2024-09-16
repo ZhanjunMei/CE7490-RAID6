@@ -11,6 +11,7 @@ class DiskManager:
                  ):
         self.disk_size = disk_size
         self.block_size = block_size
+        self.block_num = disk_size // block_size
         if disks is None:
             self.disks = [
                 ('f', './disks/'),
@@ -22,6 +23,16 @@ class DiskManager:
             ]
         else:
             self.disks = disks
+        self.disk_num = len(disks)
+
+
+    def check_block(self, disk_idx, block_idx):
+        if self.disks[disk_idx][0] == 'f':
+            disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
+            block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+            if not os.path.isfile(block_path):
+                return -2
+            return 0
 
 
     def check_disk(self, disk_idx):
@@ -32,41 +43,56 @@ class DiskManager:
             return 0
 
 
-    def clear_disk(self, disk_idx):
+    def reset_disk(self, disk_idx):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
             if os.path.exists(disk_path):
                 shutil.rmtree(disk_path)
             os.makedirs(disk_path)
+            for i in range(self.block_num):
+                block_path = os.path.join(disk_path, 'block_{}'.format(i))
+                with open(block_path, 'wb') as f:
+                    f.write(b'\x00' * self.block_size)
+            return 0
+
+
+    def reset_block(self, disk_idx, block_idx):
+        if self.disks[disk_idx][0] == 'f':
+            disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
+            if not os.path.exists(disk_path):
+                return -1
+            block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+            with open(block_path, 'wb') as f:
+                f.write(b'\x00' * self.block_size)
+            return 0
 
 
     def write_block(self, block, disk_idx, block_idx):
-        # Folder
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
             if not os.path.isdir(disk_path):
-                return -1  # TODO disk failed
-            block_path = os.path.join(self.disks[disk_idx][1],
-                                      'disk_{}'.format(disk_idx),
-                                      'block_{}'.format(block_idx))
+                return -1  # disk failed
+            block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+            if not os.path.isfile(block_path):
+                return -2  # block failed
             with open(block_path, 'wb') as file:
                 file.write(block)
-        return 0
+            return 0
 
 
     def read_block(self, disk_idx, block_idx):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
             if not os.path.isdir(disk_path):
-                return None  # TODO disk failed
-            block_path = os.path.join(self.disks[disk_idx][1],
-                                      'disk_{}'.format(disk_idx),
-                                      'block_{}'.format(block_idx))
-            if os.path.isfile(block_path):
-                with open(block_path, 'rb') as file:
-                    return bytearray(file.read())
-            else:
-                return bytearray(b'\x00' * self.block_size)
+                return -1, None  # disk failed
+            block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+            if not os.path.isfile(block_path):
+                return -2, None  # block failed
+            with open(block_path, 'rb') as file:
+                data = bytearray(file.read())
+                if len(data) != self.block_size:
+                    return -2, None  # block failed
+                return 0, data
 
 
 if __name__ == '__main__':

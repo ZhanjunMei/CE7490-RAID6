@@ -1,3 +1,5 @@
+from configparser import Error
+
 from raid6.disk_manager import DiskManager
 
 
@@ -201,12 +203,58 @@ class FileManager:
         self._reset_pq(b)
 
 
+    def _recover_from_failure(self, block_idx):
+        failed_disks = []
+        for i in range(self.disk_num):
+            if self.disk_manager.check_disk(i) != 0:
+                failed_disks.append(i)
+                if len(failed_disks) > 2:
+                    raise Error('Failure in more than 2 disks!')
+        if len(failed_disks) > 0:
+            for b in range(self.block_num):
+                block_data = []
+                failed_block_disk_idx = []
+                for d in range(self.disk_num):
+                    if d in failed_disks or self.disk_manager.check_block(d, b) != 0:
+                        failed_block_disk_idx.append(d)
+                        if len(failed_block_disk_idx) > 2:
+                            raise Error('Failure in more than 2 blocks in a same stride')
+                for d in range(self.disk_num):
+                    if d not in failed_block_disk_idx:
+                        block_data.append(self._read_block(d, b))
+                    else:
+                        block_data.append(bytearray('\x00' * self.block_size))
+                # TODO recover
+        else:
+            block_data = []
+            failed_block_disk_idx = []
+            for d in range(self.disk_num):
+                if d in failed_disks or self.disk_manager.check_block(d, block_idx) != 0:
+                    failed_block_disk_idx.append(d)
+                    if len(failed_block_disk_idx) > 2:
+                        raise Error('Failure in more than 2 blocks in a same stride')
+            for d in range(self.disk_num):
+                if d not in failed_block_disk_idx:
+                    block_data.append(self._read_block(d, block_idx))
+                else:
+                    block_data.append(bytearray('\x00' * self.block_size))
+            # TODO recover
+
+
     def _read_block(self, disk_idx, block_idx):
-        return self.disk_manager.read_block(disk_idx, block_idx)
+        res, data = self.disk_manager.read_block(disk_idx, block_idx)
+        while res != 0:
+            self._recover_from_failure(block_idx)
+            res, data = self.disk_manager.read_block(disk_idx, block_idx)
+        return data
 
 
     def _write_block(self, block, disk_idx, block_idx):
-        return self.disk_manager.write_block(block, disk_idx, block_idx)
+        res = self.disk_manager.write_block(block, disk_idx, block_idx)
+        while res != 0:
+            self._recover_from_failure(block_idx)
+            res = self.disk_manager.write_block(block, disk_idx, block_idx)
+        return 0
 
 
     def _cal_block_p(self, block_idx):
@@ -425,61 +473,30 @@ class FileManager:
         return entries
 
 
-    def clear_disk(self, disk_idx):
-        self.disk_manager.clear_disk(disk_idx)
-
-
-    def check_disk(self, disk_idx):
-        return self.disk_manager.check_disk(disk_idx)
-
-
-    def recover_failed_disks(self, d0, d1=None):
-        self.disk_manager.clear_disk(d0)
-        if d1 is not None:
-            self.disk_manager.clear_disk(d1)
-        for b in range(self.block_num):
-            p_idx = self._get_p_disk(b)
-            q_idx = self._get_q_disk(b)
-            blocks = [None for _ in range(self.disk_num - 2)]
-            for d in range(self.disk_num):
-                if d == d0 or d == d1:
-                    continue
-                blocks[d] = self._read_block(d, b)
-            d0_block, d1_block = bytearray(), bytearray()
-            for i in range(self.block_size):
-                tmp = []
-                for d in range(self.disk_num):
-                    if blocks[i] is None:
-                        tmp.append(None)
-                    else:
-                        tmp.append(blocks[d][i])
-                d0_byte, d1_byte = b'\x00', b'\x00' # TODO calculate
-                d0_block.extend(d0_byte)
-                d1_block.extend(d1_byte)
-            self._write_block(d0_block, d0, b)
-            if d1 is not None:
-                self._write_block(d1_block, d1, b)
+    def reset_disk(self, disk_idx):
+        return self.disk_manager.reset_disk(disk_idx)
 
 
     def check_corrupt(self, block_idx):
-        data_blocks = []
-        pq_blocks = [None, None]
-        p_idx = self._get_p_disk(block_idx)
-        q_idx = self._get_q_disk(block_idx)
-        for d in range(self.disk_num):
-            if d == p_idx:
-                pq_blocks[0] = self._read_block(d, block_idx)
-            elif d == q_idx:
-                pq_blocks[1] = self._read_block(d, block_idx)
-            else:
-                data_blocks.append(self.recover_failed_disks(d, block_idx))
-        data_blocks.extend(pq_blocks)
-        corrupt_blocks = set()
-        for i in range(self.block_size):
-            tmp = [data_blocks[d][i] for d in range(self.disk_num)]
-            corrupt = 0 # TODO, calculate
-            corrupt_blocks.add(corrupt)
-        return corrupt_blocks
+        pass
+        # data_blocks = []
+        # pq_blocks = [None, None]
+        # p_idx = self._get_p_disk(block_idx)
+        # q_idx = self._get_q_disk(block_idx)
+        # for d in range(self.disk_num):
+        #     if d == p_idx:
+        #         pq_blocks[0] = self._read_block(d, block_idx)
+        #     elif d == q_idx:
+        #         pq_blocks[1] = self._read_block(d, block_idx)
+        #     else:
+        #         data_blocks.append(self.recover_failed_disks(d, block_idx))
+        # data_blocks.extend(pq_blocks)
+        # corrupt_blocks = set()
+        # for i in range(self.block_size):
+        #     tmp = [data_blocks[d][i] for d in range(self.disk_num)]
+        #     corrupt = 0 # TODO, calculate
+        #     corrupt_blocks.add(corrupt)
+        # return corrupt_blocks
 
 
     def recover_corruption(self, corrupt):
@@ -505,7 +522,7 @@ if __name__ == '__main__':
 
     file_manager = FileManager(disk_size, block_size, max_file_num, disks)
     for i in range(len(disks)):
-        file_manager.clear_disk(i)
+        file_manager.reset_disk(i)
 
     import random, os, shutil
     random.seed(0)

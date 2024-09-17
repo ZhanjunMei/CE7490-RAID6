@@ -34,19 +34,19 @@ class Galoisfield256:
                 temp.append(res)
             self.power_dict.append(temp)
         
-    def add(a,b):
-        return a^b
+    def add(self, a, b):
+        return a ^ b
     
-    def sub(a,b):
-        return a^b
+    def sub(self, a, b):
+        return a ^ b
     
-    def multiply(self,a,b):
+    def multiply(self, a, b):
         return self.multi_dict[a][b]
 
-    def div(self,a,b):
-        return self.multiply[a][self.inverse(b)]
+    def div(self, a, b):
+        return self.multi_dict[a][self.inverse(b)]
     
-    def power(self,a,pow):
+    def power(self, a, pow):
         if pow<0:
             raise ValueError("We do not support negative power. Please use .inverse() instead.")
         elif a == 0:
@@ -54,7 +54,7 @@ class Galoisfield256:
         else:
             return self.power_dict[a][pow]
         
-    def inverse(self,a):
+    def inverse(self, a):
         if a == 0:
             raise ValueError("0 does not have inverse!")
         return self.power(a,254)

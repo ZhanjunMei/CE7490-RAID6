@@ -1,4 +1,4 @@
-from raid6.Galoisfield256 import Galoisfield256
+from Galoisfield256 import Galoisfield256
 
 _mygf = Galoisfield256()
 
@@ -41,7 +41,7 @@ def failure_fix(D: list, pos: list) -> list:
             Q = sum_list_Q(D_[:-2])
             return [Q]
         else: # disk with data fails
-            tmp = D_[:-2].copy()
+            tmp = D_[:-1].copy()
             tmp.pop(pos[0])
             Dx = sum_list(tmp)
             return [Dx]
@@ -60,6 +60,7 @@ def failure_fix(D: list, pos: list) -> list:
             Qx = sum_list_Q(D_[:-2])
             Dx = _mygf.add(D_[-1], Qx)
             Dx = _mygf.multiply(Dx, _mygf.power(g, 255-pos[0]))
+            D_[pos[0]] = Dx
             P = sum_list(D_[:-2])
             return [Dx, P]
 
@@ -123,9 +124,11 @@ if __name__ == '__main__':
     steps = 100
     for i in range(steps):
         arr = []
-        for _ in range(disk_num - 2):
+        for _ in range(disk_num):
             arr.append(random.randint(0, 255))
-        arr.extend(compute_PQ(arr))
+        P, Q = compute_PQ(arr)
+        arr[-2] = P
+        arr[-1] = Q
         failed_arr = copy.deepcopy(arr)
         if random.random() < 0.5:
             # single failure

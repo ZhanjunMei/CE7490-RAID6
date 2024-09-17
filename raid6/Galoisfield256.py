@@ -59,5 +59,12 @@ class Galoisfield256:
             raise ValueError("0 does not have inverse!")
         return self.power(a,254)
 
+    def log(self,a):
+
+        if a == 0:
+            raise ValueError("the definition field of log does not cover 0!")
+        for i in range(256):
+            if self.power_dict[2][i] == a:
+                return i
 
 

@@ -50,7 +50,7 @@ def failure_fix(D: list, pos: list) -> list:
         if pos[0]>= pos[1]:
             raise Exception('Please make sure pos[0] < pos[1]')
         D_ = D.copy()
-        g = gf(2)
+        g = 2
         if pos[0]==total-2 and pos[1]==total-1: # disks with P & Q fail
             P = sum_list(D_[:-2])
             Q = sum_list_Q(D_[:-2])
@@ -112,3 +112,72 @@ def corruption_check_fix(D: list) -> list:
     Dz = sum_list(D_[:-1])
 
     return [z, Dz]
+
+
+if __name__ == '__main__':
+    import random, copy
+
+    # test failure
+    print('--- test failure ---')
+    disk_num = 10
+    steps = 100
+    for i in range(steps):
+        arr = []
+        for _ in range(disk_num - 2):
+            arr.append(random.randint(0, 255))
+        arr.extend(compute_PQ(arr))
+        failed_arr = copy.deepcopy(arr)
+        if random.random() < 0.5:
+            # single failure
+            idx = random.randint(0, disk_num - 1)
+            failed_arr[idx] = 0
+            recover = failure_fix(failed_arr, [idx])
+            if recover[0] != arr[idx]:
+                print('error')
+                print('arr:', arr)
+                print('idx:', idx)
+                print('recover:', recover)
+                break
+        else:
+            # double failure
+            idx0 = random.randint(0, disk_num - 2)
+            idx1 = random.randint(idx0 + 1, disk_num - 1)
+            failed_arr[idx0] = failed_arr[idx1] = 0
+            recover = failure_fix(failed_arr, [idx0, idx1])
+            if recover[0] != arr[idx0] or recover[1] != arr[idx1]:
+                print('error')
+                print('arr:', arr)
+                print('idx:', [idx0, idx1])
+                print('recover:', recover)
+                break
+
+    # test corruption
+    # print('--- test corruption ---')
+    # disk_num = 10
+    # steps = 100
+    # for i in range(steps):
+    #     arr = []
+    #     for _ in range(disk_num - 2):
+    #         arr.append(random.randint(0, 255))
+    #     arr.extend(compute_PQ(arr))
+    #     corrupted_arr = copy.deepcopy(arr)
+    #     if random.random() < 0.2:
+    #         # no corruption
+    #         res = corruption_check_fix(corrupted_arr)
+    #         if res[0] >= 0:
+    #             print('error: no corruption')
+    #             print(corrupted_arr)
+    #             break
+    #     else:
+    #         idx = random.randint(0, disk_num - 1)
+    #         t = random.randint(0, 255)
+    #         while t == arr[idx]:
+    #             t = random.randint(0, 255)
+    #         corrupted_arr[idx] = t
+    #         res = corruption_check_fix(corrupted_arr)
+    #         if res[0] != idx or res[1] != t:
+    #             print('error')
+    #             print('arr:', arr)
+    #             print('corrupted:', [idx, t])
+    #             print('ans:', [idx, arr[idx]])
+    #             print('res:', res)

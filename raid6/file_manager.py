@@ -324,6 +324,7 @@ class FileManager:
         self._write_block(block_p, self._get_p_disk(block_idx), block_idx)
         self._write_block(block_q, self._get_q_disk(block_idx), block_idx)
 
+
     def _able_to_add_file(self, file_name, file_size):
         entries = self.list_files()
         occupied_blocks = 0

@@ -3,8 +3,11 @@ import logging
 import os
 import shutil
 import random
+import sys
 import time
 import traceback
+import matplotlib.pyplot as plt
+from matplotlib import ticker
 
 random.seed(0)
 
@@ -375,7 +378,7 @@ class Test:
             self.recover_test_files()
 
 
-if __name__ == '__main__':
+def random_test():
     disk_size = 1 * 500 * 1024  # Bytes
     block_size = 4 * 1024  # Bytes
     max_file_num = 10
@@ -394,3 +397,153 @@ if __name__ == '__main__':
     myTest = Test(disk_size, block_size, max_file_num, disks)
     myTest.reset()
     myTest.random_test(steps=1000)
+
+
+def time_test1():
+    disk_size = 1 * 1024 * 1024  # Bytes
+    max_file_num = 1
+    with open('./test_time/1.jpg', 'rb') as f:
+        d0 = f.read()
+    modify_begin, modify_end = 10 * 1024, 30 * 1024
+    modify_data = bytearray(os.urandom(modify_end - modify_begin))
+    block_sizes = [1, 2, 4, 8, 16, 32, 64]
+    disk_nums = [4, 8, 12]
+    result = {
+        'block_sizes': block_sizes,
+        'disk_nums': disk_nums,
+        'add': [[] for _ in range(len(disk_nums))],
+        'read': [[] for _ in range(len(disk_nums))],
+        'modify': [[] for _ in range(len(disk_nums))],
+        'delete': [[] for _ in range(len(disk_nums))],
+    }
+    for di, disk_num in enumerate(disk_nums):
+        print(f'--- disk: {disk_num} ---')
+        disks = [('f', './disks/')] * disk_num
+        block_sizes = block_sizes
+        for b in block_sizes:
+            block_size = b * 1024
+            print(f'----- block: {block_size} ------')
+            file_manager = FileManager(disk_size, block_size, max_file_num, disks)
+            for d in range(disk_num):
+                file_manager.reset_disk(d)
+            t0 = time.time()
+            file_manager.add_file('1.jpg', d0)
+            t1 = time.time()
+            d1 = file_manager.read_file('1.jpg')
+            t2 = time.time()
+            file_manager.modify_file('1.jpg', modify_begin, modify_end, modify_data)
+            t3_1 = time.time()
+            d2 = file_manager.read_file('1.jpg')
+            t3_2 = time.time()
+            file_manager.del_file('1.jpg')
+            t4 = time.time()
+
+            if d1 != d0:
+                print('--- error in reading ---')
+                sys.exit()
+            dm = bytearray(copy.deepcopy(d0))
+            dm[modify_begin:modify_end] = modify_data
+            if d2 != dm:
+                print('--- error in modifying ---')
+                sys.exit()
+            if file_manager.read_file('1.jpg') is not None:
+                print('--- error in deleting ---')
+                sys.exit()
+
+            print(f'add: {(t1 - t0):.6f}')
+            print(f'read: {(t2 - t1):.6f}')
+            print(f'modify: {(t3_1 - t2):.6f}')
+            print(f'delete: {(t4 - t3_2):.6f}')
+            result['add'][di].append(t1 - t0)
+            result['read'][di].append(t2 - t1)
+            result['modify'][di].append(t3_1 - t2)
+            result['delete'][di].append(t4 - t3_2)
+
+    for op in ['add', 'read', 'modify', 'delete']:
+        file_path = f'./test_time/test_block_{op}.jpg'
+        plt.clf()
+        for di, d in enumerate(result['disk_nums']):
+            plt.plot(result['block_sizes'], result[op][di], label=f'disk_{d}')
+        plt.title(f'{op} time')
+        plt.xlabel('block size (KB)')
+        plt.ylabel('time (s)')
+        plt.legend()
+        plt.savefig(file_path)
+
+
+def time_test2():
+    disk_size = 1 * 1024 * 1024  # Bytes
+    max_file_num = 1
+    with open('./test_time/1.jpg', 'rb') as f:
+        d0 = f.read()
+    modify_begin, modify_end = 10 * 1024, 30 * 1024
+    modify_data = bytearray(os.urandom(modify_end - modify_begin))
+    block_sizes = [4, 16, 64]
+    disk_nums = [4, 5, 6, 7, 8, 9, 10, 11, 12]
+    result = {
+        'block_sizes': block_sizes,
+        'disk_nums': disk_nums,
+        'add': [[] for _ in range(len(block_sizes))],
+        'read': [[] for _ in range(len(block_sizes))],
+        'modify': [[] for _ in range(len(block_sizes))],
+        'delete': [[] for _ in range(len(block_sizes))],
+    }
+    for bi, b in enumerate(block_sizes):
+        block_size = b * 1024
+        print(f'--- block: {block_size} ---')
+        for di, disk_num in enumerate(disk_nums):
+            disks = [('f', './disks/')] * disk_num
+            print(f'--- disk: {disk_num} ---')
+            file_manager = FileManager(disk_size, block_size, max_file_num, disks)
+            for d in range(disk_num):
+                file_manager.reset_disk(d)
+            t0 = time.time()
+            file_manager.add_file('1.jpg', d0)
+            t1 = time.time()
+            d1 = file_manager.read_file('1.jpg')
+            t2 = time.time()
+            file_manager.modify_file('1.jpg', modify_begin, modify_end, modify_data)
+            t3_1 = time.time()
+            d2 = file_manager.read_file('1.jpg')
+            t3_2 = time.time()
+            file_manager.del_file('1.jpg')
+            t4 = time.time()
+            if d1 != d0:
+                print('--- error in reading ---')
+                sys.exit()
+            dm = bytearray(copy.deepcopy(d0))
+            dm[modify_begin:modify_end] = modify_data
+            if d2 != dm:
+                print('--- error in modifying ---')
+                sys.exit()
+            if file_manager.read_file('1.jpg') is not None:
+                print('--- error in deleting ---')
+                sys.exit()
+
+            print(f'add: {(t1 - t0):.6f}')
+            print(f'read: {(t2 - t1):.6f}')
+            print(f'modify: {(t3_1 - t2):.6f}')
+            print(f'delete: {(t4 - t3_2):.6f}')
+            result['add'][bi].append(t1 - t0)
+            result['read'][bi].append(t2 - t1)
+            result['modify'][bi].append(t3_1 - t2)
+            result['delete'][bi].append(t4 - t3_2)
+
+    for op in ['add', 'read', 'modify', 'delete']:
+        file_path = f'./test_time/test_disk_{op}.jpg'
+        plt.clf()
+        for bi, b in enumerate(result['block_sizes']):
+            plt.plot(result['disk_nums'], result[op][bi], label=f'block_{b}KB')
+        plt.gca().xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        plt.title(f'{op} time')
+        plt.xlabel('disk number')
+        plt.ylabel('time (s)')
+        plt.legend()
+        plt.savefig(file_path)
+
+
+if __name__ == '__main__':
+    pass
+    # random_test()
+    # time_test1()
+    time_test2()

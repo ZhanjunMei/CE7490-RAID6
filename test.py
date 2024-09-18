@@ -81,20 +81,20 @@ class Test:
 
         recovery_time = None
         t0 = time.time()
-        self.file_manager.add_file(file_name, d0)
+        res = self.file_manager.add_file(file_name, d0)
         disk_rec_time = self.file_manager.get_recovery_time()
         if disk_rec_time is not None:
             recovery_time = disk_rec_time
             self.has_failed_disks = False
         t1 = time.time()
         d1 = self.file_manager.read_file(file_name)
-        if self.file_manager.get_recovery_time() is not None:
+        if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
             return -1
         t2 = time.time()
         ls = set([x['file_name'] for x in self.file_manager.list_files()])
-        if self.file_manager.get_recovery_time() is not None:
+        if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
             return -1
@@ -203,20 +203,20 @@ class Test:
 
         recovery_time = None
         t0 = time.time()
-        self.file_manager.modify_file(file_name, begin, end, new_data)
+        res = self.file_manager.modify_file(file_name, begin, end, new_data)
         disk_rec_time = self.file_manager.get_recovery_time()
         if disk_rec_time is not None:
             recovery_time = disk_rec_time
             self.has_failed_disks = False
         t1 = time.time()
         d2 = self.file_manager.read_file(file_name)
-        if self.file_manager.get_recovery_time() is not None:
+        if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
             return -1
         t2 = time.time()
         ls = self.file_manager.list_files()
-        if self.file_manager.get_recovery_time() is not None:
+        if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
             return -1
@@ -267,24 +267,21 @@ class Test:
             for s in range(steps):
                 op = random.random() # operation id
 
-                if s == 51:
-                    pass
-
                 # fail disks
-                # if not self.has_failed_disks and random.random() < 0.2:
-                #     if random.random() < 0.5:
-                #         # 2 disks
-                #         disk0 = random.randint(0, self.disk_num - 2)
-                #         disk1 = random.randint(disk0 + 1, self.disk_num - 1)
-                #         self.file_manager.fail_disk(disk0)
-                #         self.file_manager.fail_disk(disk1)
-                #     else:
-                #         # 1 disk
-                #         disk0 = random.randint(0, self.disk_num - 1)
-                #         disk1 = -1
-                #         self.file_manager.fail_disk(disk0)
-                #     self.logger.info(f'fail_disk, {disk0}, {disk1}, -1, 0.0')
-                #     self.has_failed_disks = True
+                if not self.has_failed_disks and random.random() < 0.2:
+                    if random.random() < 0.5:
+                        # 2 disks
+                        disk0 = random.randint(0, self.disk_num - 2)
+                        disk1 = random.randint(disk0 + 1, self.disk_num - 1)
+                        self.file_manager.fail_disk(disk0)
+                        self.file_manager.fail_disk(disk1)
+                    else:
+                        # 1 disk
+                        disk0 = random.randint(0, self.disk_num - 1)
+                        disk1 = -1
+                        self.file_manager.fail_disk(disk0)
+                    self.logger.info(f'fail_disk, {disk0}, {disk1}, -1, 0.0')
+                    self.has_failed_disks = True
 
                 self.logger.info(f'--- s:{s}, op:{op:.4f}, failed:{self.has_failed_disks} ---')
 
@@ -395,3 +392,11 @@ if __name__ == '__main__':
     myTest = Test(disk_size, block_size, max_file_num, disks)
     myTest.reset()
     myTest.random_test(steps=1000)
+    # myTest.test_add_file('3.txt', [])
+    # myTest.test_add_file('4.txt', ['3.txt'])
+    #
+    # myTest.fail_disks([3])
+    # myTest.test_add_file('3.pdf', ['3.txt', '4.txt'])
+    # # myTest.test_delete_file('4.txt', ['3.txt', '4.txt', '3.pdf'])
+    # myTest.test_read_file('3.txt', ['3.txt', '4.txt', '3.pdf'])
+    # myTest.test_read_file('3.pdf', ['3.txt', '4.txt', '3.pdf'])

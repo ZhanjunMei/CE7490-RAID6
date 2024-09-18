@@ -67,17 +67,32 @@ class DiskManager:
             return 0
 
 
+    def check_failure(self, block_idx):
+        for d in range(self.disk_num):
+            if self.disks[d][0] == 'f':
+                disk_path = os.path.join(self.disks[d][1], 'disk_{}'.format(d))
+                if not os.path.isdir(disk_path):
+                    return -1
+                block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+                if not os.path.isfile(block_path):
+                    return -2
+        return 0
+
+
     def write_block(self, block, disk_idx, block_idx, force=False):
+        res = self.check_failure(block_idx)
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
-            if not os.path.isdir(disk_path):
-                if not force:
-                    return -1  # disk failed
-                else:
-                    os.makedirs(disk_path)
             block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
-            if not force and not os.path.isfile(block_path):
-                return -2  # block failed
+            if res == 0:
+                with open(block_path, 'wb') as file:
+                    file.write(block)
+                return 0
+            if not force:
+                return res
+            # force to write
+            if not os.path.isdir(disk_path):
+                os.makedirs(disk_path)
             with open(block_path, 'wb') as file:
                 file.write(block)
             return 0

@@ -494,7 +494,7 @@ class FileManager:
             return self.add_file(file_name, new_data)
         # keep the same size
         if begin == end:
-            return 0
+            return -1
         offset = 0
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
         while offset <= end:
@@ -513,6 +513,7 @@ class FileManager:
             disk_idx = self._block_get_next_disk(block)
             block_idx = self._block_get_next_block(block)
             offset += self.block_data_size
+        return 0
 
 
     def list_files(self):

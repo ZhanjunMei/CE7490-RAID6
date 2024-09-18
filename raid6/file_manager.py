@@ -1,5 +1,7 @@
-from raid6.disk_manager import DiskManager
-from raid6.fault_tolerance import failure_fix, corruption_check_fix, compute_PQ
+import time
+
+from .fault_tolerance import failure_fix, corruption_check_fix, compute_PQ
+from .disk_manager import DiskManager
 
 
 class FileManager:
@@ -36,7 +38,7 @@ class FileManager:
         self.disk_num = len(disks)
         self.disk_size = disk_size
         self.block_size = block_size
-        self.block_num = disk_size // block_size
+        self.block_num = int(disk_size // block_size)
         self.block_head_size = 12
         self.block_data_size = self.block_size - self.block_head_size
         # disk_manager
@@ -47,20 +49,22 @@ class FileManager:
         self._last_table_block = 0
         self._table_entry_size = 32
         self._init_file_table(max_file_num)
+        # recovery
+        self._recovery_time = None
 
     def _init_file_table(self, max_files):
         max_file_num = (self.disk_num - 2) * (self.disk_size // self.block_size)
         if max_files is not None:
             max_file_num = min(max_files, max_file_num)
-        max_entry_size = max_file_num * self._table_entry_size
-        max_table_blocks = max_entry_size // self.block_size
-        if max_entry_size % self.block_size != 0:
+        max_entry_num_per_block = int(self.block_size // self._table_entry_size)
+        max_table_blocks = int(max_file_num // max_entry_num_per_block)
+        if max_file_num % max_entry_num_per_block != 0:
             max_table_blocks += 1
         self._max_file_blocks = (self.disk_num - 2) * (self.disk_size // self.block_size) - max_table_blocks
         res = max_table_blocks % (self.disk_num - 2)
         self._last_table_block = max_table_blocks // (self.disk_num - 2)
         if res == 0:
-            self._last_table_disk = self.disk_size - 1
+            self._last_table_disk = self.disk_num - 1
         else:
             block_idx = max_table_blocks // (self.disk_num - 2)
             self._last_table_block = block_idx
@@ -113,7 +117,7 @@ class FileManager:
                 return None
             if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
                 continue
-            block = self._read_block(d, b)
+            res, block = self._read_block(d, b)
             size = self._block_get_size(block)
             if size == 0:
                 return d, b
@@ -150,7 +154,7 @@ class FileManager:
                 b += 1
             if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
                 continue
-            block = self._read_block(d, b)
+            res, block = self._read_block(d, b)
             offset = 0
             while offset < self.block_size:
                 entry = self._entry_byte_to_dict(
@@ -174,7 +178,7 @@ class FileManager:
                 b += 1
             if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
                 continue
-            block = self._read_block(d, b)
+            res, block = self._read_block(d, b)
             offset = 0
             while offset < len(block):
                 if block[offset] != 0x0:
@@ -195,43 +199,49 @@ class FileManager:
 
     def _del_file_from_table(self, file_entry):
         d, b = file_entry['entry_disk'], file_entry['entry_block']
-        block = self._read_block(d, b)
+        res, block = self._read_block(d, b)
         offset = file_entry['entry_offset']
         block[offset:offset+self._table_entry_size] = bytearray(b'\x00' * self._table_entry_size)
         self._write_block(block, d, b)
         self._reset_pq(b)
 
 
-    def _recover_strides_from_failure(self, blocks, failed_idx):
-        if len(failed_idx) == 1:
-            new_blocks = [bytearray()]
-            for i in range(self.block_size):
-                arr = [blocks[d][i] for d in range(len(blocks))]
-                recover = failure_fix(arr, failed_idx)
-                new_blocks[0].append(recover[0])
-            return new_blocks
-        elif len(failed_idx) == 2:
-            new_blocks = [bytearray(), bytearray()]
-            for i in range(self.block_size):
-                arr = [blocks[d][i] for d in range(len(blocks))]
-                recover = failure_fix(arr, failed_idx)
-                new_blocks[0].append(recover[0])
-                new_blocks[1].append(recover[1])
-            return new_blocks
+    def _disk_real_to_algo(self, idx, p_idx, q_idx):
+        if idx == p_idx:
+            return self.disk_num - 2
+        if idx == q_idx:
+            return self.disk_num - 1
+        if p_idx == self.disk_num - 1:
+            return idx - 1
+        if idx > p_idx:
+            return idx - 2
+        return idx
 
 
-    def _recover_blocks_from_failure(self, blocks, failed_disks):
+    def _disk_algo_to_real(self, idx, p_idx, q_idx):
+        if idx == self.disk_num - 2:
+            return p_idx
+        if idx == self.disk_num - 1:
+            return q_idx
+        if p_idx == self.disk_num - 1:
+            return idx + 1
+        if idx >= p_idx:
+            return idx + 2
+        return idx
+
+
+    def _recover_stripe_blocks_from_failure(self, strip_blocks, failed_disks):
         if len(failed_disks) == 1:
             new_blocks = [bytearray()]
             for i in range(self.block_size):
-                arr = [blocks[d][i] for d in range(len(blocks))]
+                arr = [strip_blocks[d][i] for d in range(len(strip_blocks))]
                 recover = failure_fix(arr, failed_disks)
                 new_blocks[0].append(recover[0])
             return new_blocks
         elif len(failed_disks) == 2:
             new_blocks = [bytearray(), bytearray()]
             for i in range(self.block_size):
-                arr = [blocks[d][i] for d in range(len(blocks))]
+                arr = [strip_blocks[d][i] for d in range(len(strip_blocks))]
                 recover = failure_fix(arr, failed_disks)
                 new_blocks[0].append(recover[0])
                 new_blocks[1].append(recover[1])
@@ -240,7 +250,7 @@ class FileManager:
 
     def _recover_stripe_from_failure(self, block_idx):
         p_idx, q_idx = self._get_p_disk(block_idx), self._get_q_disk(block_idx)
-        block_stride, pq_blocks = [], [None, None]
+        block_stripe, pq_blocks = [], [None, None]
         failed_disks = []
         for d in range(self.disk_num):
             if self.disk_manager.check_block(d, block_idx) != 0:
@@ -249,25 +259,32 @@ class FileManager:
                     raise Exception('Failure in more than 2 disks of a stripe!')
         if len(failed_disks) == 0:
             return
+        algo_disks = []
+        for d in failed_disks:
+            algo_disks.append(self._disk_real_to_algo(d, p_idx, q_idx))
+        if len(algo_disks) == 2 and algo_disks[0] > algo_disks[1]:
+            algo_disks[0], algo_disks[1] = algo_disks[1], algo_disks[0]
+            failed_disks[0], failed_disks[1] = failed_disks[1], failed_disks[0]
         for d in range(self.disk_num):
             if d not in failed_disks:
-                block_data = self.disk_manager.read_block(d, block_idx)
+                res, block_data = self.disk_manager.read_block(d, block_idx)
             else:
-                block_data = bytearray('\x00' * self.block_size)
+                block_data = bytearray(b'\x00' * self.block_size)
             if d == p_idx:
                 pq_blocks[0] = block_data
             elif d == q_idx:
                 pq_blocks[1] = block_data
             else:
-                block_stride.append(block_data)
-        block_stride.extend(pq_blocks)
-        res = self._recover_blocks_from_failure(block_stride, failed_disks)
-        self._write_block(res[0], failed_disks[0], block_idx)
+                block_stripe.append(block_data)
+        block_stripe.extend(pq_blocks)
+        res = self._recover_stripe_blocks_from_failure(block_stripe, algo_disks)
+        self._write_block(res[0], failed_disks[0], block_idx, force=True)
         if len(failed_disks) == 2:
-            self._write_block(res[1], failed_disks[1], block_idx)
+            self._write_block(res[1], failed_disks[1], block_idx, force=True)
 
 
     def _recover_from_failure(self, block_idx):
+        t0 = time.time()
         failed_disks = []
         for i in range(self.disk_num):
             if self.disk_manager.check_disk(i) != 0:
@@ -279,6 +296,8 @@ class FileManager:
                 self._recover_stripe_from_failure(b)
         else:
             self._recover_stripe_from_failure(block_idx)
+        t1 = time.time()
+        self._recovery_time = t1 - t0
 
 
     def _read_block(self, disk_idx, block_idx, no_failure=False):
@@ -290,16 +309,16 @@ class FileManager:
             res, data = self.disk_manager.read_block(disk_idx, block_idx)
             if res != 0:
                 raise Exception('Unable to handle failure after recovery!')
-        return data
+        return res, data
 
 
-    def _write_block(self, block, disk_idx, block_idx, no_failure=False):
-        res = self.disk_manager.write_block(block, disk_idx, block_idx)
+    def _write_block(self, block, disk_idx, block_idx, no_failure=False, force=False):
+        res = self.disk_manager.write_block(block, disk_idx, block_idx, force=force)
         if res != 0:
             if no_failure:
                 raise Exception('Unable to handle failure!')
             self._recover_from_failure(block_idx)
-            res = self.disk_manager.write_block(block, disk_idx, block_idx)
+            res = self.disk_manager.write_block(block, disk_idx, block_idx, force=force)
             if res != 0:
                 raise Exception('Unable to handle failure after recovery!')
         return res
@@ -309,10 +328,12 @@ class FileManager:
         blocks = []
         for i in range(self.disk_num):
             if i != self._get_p_disk(block_idx) and i != self._get_q_disk(block_idx):
-                blocks.append(self._read_block(i, block_idx))
+                res, block_data = self._read_block(i, block_idx)
+                blocks.append(block_data)
         block_p, block_q = bytearray(), bytearray()
         for j in range(self.block_size):
             arr = [blocks[i][j] for i in range(len(blocks))]
+            arr.extend([0, 0])
             res = compute_PQ(arr)
             block_p.append(res[0])
             block_q.append(res[1])
@@ -375,10 +396,12 @@ class FileManager:
             if file_entry is None:
                 return None
         data = bytearray()
+        if file_entry['file_size'] == 0:
+            return data
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
         has_next = True
         while has_next:
-            block = self._read_block(disk_idx, block_idx)
+            res, block = self._read_block(disk_idx, block_idx)
             size = self._block_get_size(block)
             if size == 0:
                 break
@@ -437,8 +460,10 @@ class FileManager:
             return
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
         self._del_file_from_table(file_entry)
+        if file_entry['file_size'] == 0:
+            return
         while True:
-            block = self._read_block(disk_idx, block_idx)
+            res, block = self._read_block(disk_idx, block_idx)
             size = self._block_get_size(block)
             next_disk = self._block_get_next_disk(block)
             next_block = self._block_get_next_block(block)
@@ -473,7 +498,7 @@ class FileManager:
         offset = 0
         disk_idx, block_idx = file_entry['file_disk'], file_entry['file_block']
         while offset <= end:
-            block = self._read_block(disk_idx, block_idx)
+            res, block = self._read_block(disk_idx, block_idx)
             if offset + self.block_data_size <= begin:
                 offset += self.block_data_size
                 disk_idx = self._block_get_next_disk(block)
@@ -500,7 +525,7 @@ class FileManager:
                 b += 1
             if self._get_p_disk(b) == d or self._get_q_disk(b) == d:
                 continue
-            block = self._read_block(d, b)
+            res, block = self._read_block(d, b)
             offset = 0
             while offset < self.block_size:
                 entry = self._entry_byte_to_dict(block[offset:offset+self._table_entry_size], d, b, offset)
@@ -514,11 +539,18 @@ class FileManager:
         return self.disk_manager.reset_disk(disk_idx)
 
 
-    def check_corrupt(self, block_idx):
+    def get_recovery_time(self):
+        ret = self._recovery_time
+        if ret is not None:
+            self._recovery_time = None
+        return ret
+
+
+    def check_and_recover_corruption(self, block_idx):
         block_stripe, pq_blocks = [], [None, None]
         p_idx, q_idx = self._get_p_disk(block_idx), self._get_q_disk(block_idx)
         for d in range(self.disk_num):
-            block_data = self._read_block(d, block_idx, no_failure=True)
+            res, block_data = self._read_block(d, block_idx, no_failure=True)
             if d == p_idx:
                 pq_blocks[0] = block_data
             elif d == q_idx:
@@ -526,26 +558,21 @@ class FileManager:
             else:
                 block_stripe.append(block_data)
         block_stripe.extend(pq_blocks)
-        corrupted_disk, recover_entries, recover_block = -1, [], bytearray()
+        algo_disk, recover_entries, recover_block = -1, [], bytearray()
         for i in range(self.block_size):
             arr = [block_stripe[d][i] for d in range(self.disk_num)]
             res_disk, res_data = corruption_check_fix(arr)
             if res_disk < 0:
                 continue
-            if corrupted_disk == -1:
-                corrupted_disk = res_disk
-            elif corrupted_disk != res_disk:
+            if algo_disk == -1:
+                algo_disk = res_disk
+            elif algo_disk != res_disk:
                 raise Exception('More than 1 block corrupted in a stripe!')
             recover_entries.append((i, res_data))
-        if corrupted_disk == -1:
+        if algo_disk == -1:
             return
-        if corrupted_disk == p_idx or corrupted_disk == q_idx:
-            pass
-        elif p_idx == self.disk_num - 1:
-            corrupted_disk += 1
-        elif corrupted_disk > p_idx:
-            corrupted_disk += 2
-        corrupted_data = self._read_block(corrupted_disk, block_idx, no_failure=True)
+        disk_idx = self._disk_algo_to_real(algo_disk, p_idx, q_idx)
+        res, corrupted_data = self._read_block(disk_idx, block_idx, no_failure=True)
         t = 0
         for i in range(self.block_size):
             if t >= len(recover_entries) or i < recover_entries[t][0]:
@@ -553,162 +580,16 @@ class FileManager:
             else:
                 recover_block.append(recover_entries[t][1])
                 t += 1
-        self._write_block(recover_block, corrupted_disk, block_idx, no_failure=True)
+        self._write_block(recover_block, disk_idx, block_idx, no_failure=True)
+
+
+    def fail_disk(self, disk_idx):
+        return self.disk_manager.fail_disk(disk_idx)
+
+
+    def corrupt_block(self, disk_idx, block_idx):
+        return self.disk_manager.corrupt_block(disk_idx, block_idx)
 
 
 if __name__ == '__main__':
-    disk_size = 5 * 1024 * 1024
-    block_size = 4 * 1024
-    max_file_num = 10
-    disks = [
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-        ('f', './disks/'),
-    ]
-
-    file_manager = FileManager(disk_size, block_size, max_file_num, disks)
-    for i in range(len(disks)):
-        file_manager.reset_disk(i)
-
-    import random, os, shutil
-    random.seed(0)
-    shutil.make_archive('./test', 'zip', './test/')
-    test_files = [os.path.join('./test/', x) for x in os.listdir('./test')]
-    exe_steps = 300
-    os_files = set()
-    out_files = set(test_files)
-    for i in range(exe_steps):
-        op = random.random()
-
-        # add_file
-        if op < 0.2:
-            if len(out_files) == 0:
-                add_file = list(os_files)[random.randint(0, len(os_files) - 1)]
-            else:
-                if random.random() < 0.8 or len(os_files) == 0:
-                    add_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-                else:
-                    add_file = list(os_files)[random.randint(0, len(os_files) - 1)]
-            os_files.add(add_file)
-            if add_file in out_files:
-                out_files.remove(add_file)
-            print(i, 'add', add_file)
-            with open(add_file, 'rb') as fread:
-                d0 = fread.read()
-            file_manager.add_file(add_file, d0)
-            d1 = file_manager.read_file(add_file)
-            ls = set([x['file_name'] for x in file_manager.list_files()])
-            if os_files != ls or d0 != d1:
-                print('error!')
-                print('--- os_files ---')
-                print(os_files)
-                print('--- ls ---')
-                print(ls)
-                if d0 != d1:
-                    print('--- d0 != d1 ---')
-                break
-
-        # delete file
-        elif op < 0.4:
-            if len(os_files) == 0:
-                del_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-            else:
-                if random.random() < 0.8 or len(out_files) == 0:
-                    del_file = list(os_files)[random.randint(0, len(os_files) - 1)]
-                else:
-                    del_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-            if del_file in os_files:
-                os_files.remove(del_file)
-            out_files.add(del_file)
-            print(i, 'del', del_file)
-            file_manager.del_file(del_file)
-            ls = set([x['file_name'] for x in file_manager.list_files()])
-            if os_files != ls:
-                print('error!')
-                print('--- os_files ---')
-                print(os_files)
-                print('--- ls ---')
-                print(ls)
-                break
-
-        # read file
-        elif op < 0.6:
-            if len(os_files) == 0:
-                read_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-            else:
-                if random.random() < 0.8 or len(out_files) == 0:
-                    read_file = list(os_files)[random.randint(0, len(os_files) - 1)]
-                else:
-                    read_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-            print(i, 'read', read_file)
-            if read_file in os_files:
-                with open(read_file, 'rb') as fread:
-                    d0 = fread.read()
-            else:
-                d0 = None
-            d1 = file_manager.read_file(read_file)
-            if d0 != d1:
-                print('error!')
-                break
-
-        # modify file
-        elif op < 1:
-            if len(os_files) == 0:
-                modify_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-            else:
-                if random.random() < 0.8 or len(out_files) == 0:
-                    modify_file = list(os_files)[random.randint(0, len(os_files) - 1)]
-                else:
-                    modify_file = list(out_files)[random.randint(0, len(out_files) - 1)]
-            print(i, 'modify', modify_file)
-            if modify_file not in os_files:
-                begin, end = 10, 20
-                new_data = bytearray(os.urandom(10))
-                d1 = None
-            else:
-                with open(modify_file, 'rb') as fm:
-                    d0 = fm.read()
-                t = random.random()
-                if t < 0.1:
-                    begin = end = random.randint(0, len(d0))
-                elif t < 0.3:
-                    if random.random() < 0.5:
-                        begin, end = 0, random.randint(0, len(d0))
-                    else:
-                        begin, end = random.randint(0, len(d0)), len(d0)
-                else:
-                    begin = random.randint(0, len(d0))
-                    end = random.randint(begin, len(d0))
-                if random.random() < 0.7:
-                    new_data = bytearray(os.urandom(end - begin))
-                else:
-                    new_len = random.randint(0, len(d0) + 3 * block_size)
-                    new_data = bytearray(os.urandom(new_len))
-                d1 = bytearray()
-                d1.extend(d0[0:begin])
-                d1.extend(new_data)
-                d1.extend(d0[end:])
-                with open(modify_file, 'wb') as fm:
-                    fm.write(d1)
-            file_manager.modify_file(modify_file, begin, end, new_data)
-            d2 = file_manager.read_file(modify_file)
-            if d1 != d2:
-                print('error!')
-                print('--- os files ---')
-                print(os_files)
-                print('--- ls ---')
-                print(file_manager.list_files())
-                print('--- begin, end, file_len, new_len ---')
-                print(begin, end, -1 if d1 is None else len(d1), len(new_data))
-                break
-
-    shutil.rmtree('./test/')
-    shutil.unpack_archive('./test.zip', './test/')
-    os.remove('./test.zip')
+    pass

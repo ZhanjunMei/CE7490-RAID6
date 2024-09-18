@@ -11,7 +11,7 @@ class DiskManager:
                  ):
         self.disk_size = disk_size
         self.block_size = block_size
-        self.block_num = disk_size // block_size
+        self.block_num = int(disk_size // block_size)
         if disks is None:
             self.disks = [
                 ('f', './disks/'),
@@ -67,13 +67,16 @@ class DiskManager:
             return 0
 
 
-    def write_block(self, block, disk_idx, block_idx):
+    def write_block(self, block, disk_idx, block_idx, force=False):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
             if not os.path.isdir(disk_path):
-                return -1  # disk failed
+                if not force:
+                    return -1  # disk failed
+                else:
+                    os.makedirs(disk_path)
             block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
-            if not os.path.isfile(block_path):
+            if not force and not os.path.isfile(block_path):
                 return -2  # block failed
             with open(block_path, 'wb') as file:
                 file.write(block)
@@ -93,6 +96,33 @@ class DiskManager:
                 if len(data) != self.block_size:
                     return -2, None  # block failed
                 return 0, data
+
+
+    def fail_disk(self, disk_idx):
+        if self.disks[disk_idx][0] == 'f':
+            disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
+            if os.path.exists(disk_path):
+                shutil.rmtree(disk_path)
+            return 0
+
+
+    def corrupt_block(self, disk_idx, block_idx):
+        import random
+        if self.disks[disk_idx][0] == 'f':
+            disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
+            if not os.path.isdir(disk_path):
+                return -1
+            block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+            if not os.path.isfile(block_path):
+                return -1
+            with open(block_path, 'rb') as f:
+                data = bytearray(f.read())
+            for i in range(len(data)):
+                if random.random() < 0.2:
+                    data[i] = random.randint(0, 255)
+            with open(block_path, 'wb') as f:
+                f.write(data)
+            return 0
 
 
 if __name__ == '__main__':

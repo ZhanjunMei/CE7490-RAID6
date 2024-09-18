@@ -1,4 +1,4 @@
-from Galoisfield256 import Galoisfield256
+from .Galoisfield256 import Galoisfield256
 
 _mygf = Galoisfield256()
 

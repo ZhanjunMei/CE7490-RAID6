@@ -542,8 +542,182 @@ def time_test2():
         plt.savefig(file_path)
 
 
+def time_test3():
+    disk_size = 1 * 1024 * 1024  # Bytes
+    max_file_num = 1
+    with open('./test_time/1.jpg', 'rb') as f:
+        d0 = f.read()
+    block_sizes = [1, 2, 4, 8, 16, 32, 64]
+    disk_nums = [4, 6, 8]
+    result = {
+        'block_sizes': block_sizes,
+        'disk_nums': disk_nums,
+        'recover_1': [[] for _ in range(len(disk_nums))],
+        'recover_2': [[] for _ in range(len(disk_nums))],
+    }
+    for di, disk_num in enumerate(disk_nums):
+        print('disk num', disk_num)
+        for bi, block_size in enumerate(block_sizes):
+            print('block', block_size)
+            disks = [('f', './disks/')] * disk_num
+            file_manager = FileManager(disk_size, block_size * 1024, max_file_num, disks)
+            for d in range(disk_num):
+                file_manager.reset_disk(d)
+            file_manager.add_file('1.jpg', d0)
+            file_manager.fail_disk(0)
+            file_manager.del_file('1.jpg')  # to trigger recovery
+            t1 = file_manager.get_recovery_time()
+
+            file_manager.add_file('1.jpg', d0)
+            file_manager.fail_disk(0)
+            file_manager.fail_disk(1)
+            file_manager.del_file('1.jpg')  # to trigger recovery
+            t2 = file_manager.get_recovery_time()
+
+            result['recover_1'][di].append(t1)
+            result['recover_2'][di].append(t2)
+
+    for i, op in enumerate(['recover_1', 'recover_2']):
+        file_path = f'./test_time/test_block_fail_{i+1}.jpg'
+        plt.clf()
+        for di, d in enumerate(result['disk_nums']):
+            plt.plot(result['block_sizes'], result[op][di], label=f'disk_{d}')
+        plt.title(f'recover time from {i+1} failure')
+        plt.xlabel('block size (KB)')
+        plt.ylabel('time (s)')
+        plt.legend()
+        plt.savefig(file_path)
+
+
+def time_test4():
+    disk_size = 1 * 1024 * 1024  # Bytes
+    max_file_num = 1
+    with open('./test_time/1.jpg', 'rb') as f:
+        d0 = f.read()
+    block_sizes = [4, 16, 64]
+    disk_nums = [4, 5, 6, 7, 8]
+    result = {
+        'block_sizes': block_sizes,
+        'disk_nums': disk_nums,
+        'recover_1': [[] for _ in range(len(block_sizes))],
+        'recover_2': [[] for _ in range(len(block_sizes))],
+    }
+    for bi, block_size in enumerate(block_sizes):
+        print('block_size', block_size)
+        for di, disk_num in enumerate(disk_nums):
+            print('disk', disk_num)
+            disks = [('f', './disks/')] * disk_num
+            file_manager = FileManager(disk_size, block_size * 1024, max_file_num, disks)
+            for d in range(disk_num):
+                file_manager.reset_disk(d)
+            file_manager.add_file('1.jpg', d0)
+            file_manager.fail_disk(0)
+            file_manager.del_file('1.jpg')  # to trigger recovery
+            t1 = file_manager.get_recovery_time()
+
+            file_manager.add_file('1.jpg', d0)
+            file_manager.fail_disk(0)
+            file_manager.fail_disk(1)
+            file_manager.del_file('1.jpg')  # to trigger recovery
+            t2 = file_manager.get_recovery_time()
+
+            result['recover_1'][bi].append(t1)
+            result['recover_2'][bi].append(t2)
+
+    for i, op in enumerate(['recover_1', 'recover_2']):
+        file_path = f'./test_time/test_disk_fail_{i+1}.jpg'
+        plt.clf()
+        for bi, b in enumerate(result['block_sizes']):
+            plt.plot(result['disk_nums'], result[op][bi], label=f'block_{b}KB')
+        plt.gca().xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        plt.title(f'recover time from {i+1} failure')
+        plt.xlabel('disk number')
+        plt.ylabel('time (s)')
+        plt.legend()
+        plt.savefig(file_path)
+
+
+def time_test5():
+    disk_size = 1 * 1024 * 1024  # Bytes
+    max_file_num = 1
+    with open('./test_time/1.jpg', 'rb') as f:
+        d0 = f.read()
+    block_sizes = [1, 2, 4, 8, 16, 32, 64]
+    disk_nums = [4, 6, 8]
+    result = {
+        'block_sizes': block_sizes,
+        'disk_nums': disk_nums,
+        'recover': [[] for _ in range(len(disk_nums))],
+    }
+    for di, disk_num in enumerate(disk_nums):
+        print('disk num', disk_num)
+        for bi, block_size in enumerate(block_sizes):
+            print('block', block_size)
+            disks = [('f', './disks/')] * disk_num
+            file_manager = FileManager(disk_size, block_size * 1024, max_file_num, disks)
+            for d in range(disk_num):
+                file_manager.reset_disk(d)
+            file_manager.add_file('1.jpg', d0)
+            t0 = time.time()
+            file_manager.check_and_recover_corruption(0)
+            t1 = time.time()
+            result['recover'][di].append(t1 - t0)
+
+    file_path = f'./test_time/test_block_corrupt.jpg'
+    plt.clf()
+    for di, d in enumerate(result['disk_nums']):
+        plt.plot(result['block_sizes'], result['recover'][di], label=f'disk_{d}')
+    plt.title(f'recover time from 1 corruption')
+    plt.xlabel('block size (KB)')
+    plt.ylabel('time (s)')
+    plt.legend()
+    plt.savefig(file_path)
+
+
+def time_test6():
+    disk_size = 1 * 1024 * 1024  # Bytes
+    max_file_num = 1
+    with open('./test_time/1.jpg', 'rb') as f:
+        d0 = f.read()
+    block_sizes = [4, 16, 64]
+    disk_nums = [4, 5, 6, 7, 8]
+    result = {
+        'block_sizes': block_sizes,
+        'disk_nums': disk_nums,
+        'recover': [[] for _ in range(len(block_sizes))],
+    }
+    for bi, block_size in enumerate(block_sizes):
+        print('block_size', block_size)
+        for di, disk_num in enumerate(disk_nums):
+            print('disk', disk_num)
+            disks = [('f', './disks/')] * disk_num
+            file_manager = FileManager(disk_size, block_size * 1024, max_file_num, disks)
+            for d in range(disk_num):
+                file_manager.reset_disk(d)
+            file_manager.add_file('1.jpg', d0)
+            t0 = time.time()
+            file_manager.check_and_recover_corruption(0)
+            t1 = time.time()
+            result['recover'][bi].append(t1 - t0)
+
+    file_path = f'./test_time/test_disk_corrupt.jpg'
+    plt.clf()
+    for bi, b in enumerate(result['block_sizes']):
+        plt.plot(result['disk_nums'], result['recover'][bi], label=f'block_{b}KB')
+    plt.gca().xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+    plt.title(f'recover time from 1 corruption')
+    plt.xlabel('disk number')
+    plt.ylabel('time (s)')
+    plt.legend()
+    plt.savefig(file_path)
+
+
 if __name__ == '__main__':
     pass
     # random_test()
     # time_test1()
-    time_test2()
+    # time_test2()
+    # time_test3()
+    # time_test4()
+    # time_test5()
+    # time_test6()

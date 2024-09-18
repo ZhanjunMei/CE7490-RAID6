@@ -51,8 +51,8 @@ class Test:
         self.recover_test_files()
         self.test_files = [x for x in os.listdir(self.test_file_dir)]
         # file manager / disks
-        self.file_manager = FileManager(disk_size, block_size, max_file_num, disks)
-        for i in range(len(disks)):
+        self.file_manager = FileManager(self.disk_size, self.block_size, self.max_file_num, self.disks)
+        for i in range(len(self.disks)):
             self.file_manager.reset_disk(i)
         self.has_failed_disks = False
 
@@ -357,7 +357,7 @@ class Test:
                         if random.random() < 0.7:
                             new_data = bytearray(os.urandom(end - begin))
                         else:
-                            new_len = random.randint(0, len(d0) + 3 * block_size)
+                            new_len = random.randint(0, len(d0) + 3 * self.block_size)
                             new_data = bytearray(os.urandom(new_len))
                     res = self.test_modify_file(file_name, os_files, begin, end, new_data)
                     if res != 0:

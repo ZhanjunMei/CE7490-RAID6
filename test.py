@@ -364,10 +364,10 @@ class Test:
                         break
 
                 # corrupt block
-                # if op < 1 and not self.has_failed_disks:
-                #     disk_idx = random.randint(0, self.disk_num - 1)
-                #     block_idx = random.randint(0, self.disk_size // self.block_size)
-                #     self.test_corrupt_block(disk_idx, block_idx)
+                elif op < 1 and not self.has_failed_disks:
+                    disk_idx = random.randint(0, self.disk_num - 1)
+                    block_idx = random.randint(0, int(self.disk_size // self.block_size) - 1)
+                    self.test_corrupt_block(disk_idx, block_idx)
 
         except Exception as e:
             traceback.print_exc()
@@ -388,15 +388,9 @@ if __name__ == '__main__':
         ('f', './disks/'),
         ('f', './disks/'),
         ('f', './disks/'),
+        ('f', './disks/'),
+        ('f', './disks/'),
     ]
     myTest = Test(disk_size, block_size, max_file_num, disks)
     myTest.reset()
     myTest.random_test(steps=1000)
-    # myTest.test_add_file('3.txt', [])
-    # myTest.test_add_file('4.txt', ['3.txt'])
-    #
-    # myTest.fail_disks([3])
-    # myTest.test_add_file('3.pdf', ['3.txt', '4.txt'])
-    # # myTest.test_delete_file('4.txt', ['3.txt', '4.txt', '3.pdf'])
-    # myTest.test_read_file('3.txt', ['3.txt', '4.txt', '3.pdf'])
-    # myTest.test_read_file('3.pdf', ['3.txt', '4.txt', '3.pdf'])

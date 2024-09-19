@@ -712,8 +712,43 @@ def time_test6():
     plt.savefig(file_path)
 
 
+def test0():
+    disk_size = 1 * 2 * 1024  # Bytes
+    block_size = 1 * 1024  # Bytes
+    max_file_num = 2
+    disks = [('f', './disks/')] * 257
+    myTest = Test(disk_size, block_size, max_file_num, disks)
+    myTest.reset()
+    file_manager = myTest.file_manager
+
+    with open('test_extreme/1.png', 'rb') as f:
+        d01 = f.read()
+    with open('test_extreme/2.png', 'rb') as f:
+        d02 = f.read()
+
+    file_manager.add_file('1.png', d01)
+    file_manager.add_file('2.png', d02)
+    if file_manager.read_file('1.png') != d01:
+        print('--- read error 1 ---')
+        sys.exit()
+    if file_manager.read_file('2.png') != d02:
+        print('--- read error 2 ---')
+        sys.exit()
+    file_manager.fail_disk(0)
+    file_manager.fail_disk(256)
+    file_manager.del_file('2.png')
+    if file_manager.read_file('1.png') != d01:
+        print('--- recovery error 1 ---')
+        sys.exit()
+    myTest.test_corrupt_block(123, 0)
+    if file_manager.read_file('1.png') != d01:
+        print('--- recovery error 2 ---')
+        sys.exit()
+
+
 if __name__ == '__main__':
     pass
+    # test0()
     # random_test()
     # time_test1()
     # time_test2()

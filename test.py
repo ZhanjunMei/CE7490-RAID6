@@ -60,12 +60,14 @@ class Test:
         self.has_failed_disks = False
 
 
+    # zip
     def backup_test_files(self):
         backup_path = os.path.join(self.test_file_dir, '.zip')
         if not os.path.isfile(backup_path):
             shutil.make_archive(self.test_file_dir, 'zip', self.test_file_dir)
 
 
+    # unzip
     def recover_test_files(self):
         backup_path = self.test_file_dir + '.zip'
         if not os.path.isfile(backup_path):
@@ -94,13 +96,13 @@ class Test:
         if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
-            return -1
+            return -1  # writing should trigger disk check
         t2 = time.time()
         ls = set([x['file_name'] for x in self.file_manager.list_files()])
         if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
-            return -1
+            return -1  # writing should trigger disk check
         t3 = time.time()
         if set(file_list) != ls or d0 != d1:
             self.logger.info('add error!')
@@ -133,17 +135,17 @@ class Test:
 
         recovery_time = None
         t0 = time.time()
-        self.file_manager.del_file(file_name)
+        res = self.file_manager.del_file(file_name)
         disk_rec_time = self.file_manager.get_recovery_time()
         if disk_rec_time is not None:
             recovery_time = disk_rec_time
             self.has_failed_disks = False
         t1 = time.time()
         ls = set([x['file_name'] for x in self.file_manager.list_files()])
-        if self.file_manager.get_recovery_time() is not None:
+        if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
-            return -1
+            return -1  # writing should trigger disk check
         t2 = time.time()
         if set(file_list) != ls:
             self.logger.info('delete error!')
@@ -216,13 +218,13 @@ class Test:
         if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
-            return -1
+            return -1  # writing should trigger disk check
         t2 = time.time()
         ls = self.file_manager.list_files()
         if res == 0 and self.file_manager.get_recovery_time() is not None:
             self.logger.info('error!')
             self.logger.info('--- recovery failed ---')
-            return -1
+            return -1  # writing should trigger disk check
         t3 = time.time()
         if d1 != d2:
             self.logger.info('modify error!')
@@ -379,7 +381,7 @@ class Test:
 
 
 def random_test():
-    disk_size = 1 * 500 * 1024  # Bytes
+    disk_size = 1 * 512 * 1024  # Bytes
     block_size = 4 * 1024  # Bytes
     max_file_num = 10
     disks = [
@@ -712,6 +714,7 @@ def time_test6():
     plt.savefig(file_path)
 
 
+# extreme test
 def test0():
     disk_size = 1 * 2 * 1024  # Bytes
     block_size = 1 * 1024  # Bytes
@@ -748,8 +751,13 @@ def test0():
 
 if __name__ == '__main__':
     pass
+    # extreme test
     # test0()
-    # random_test()
+
+    # random test
+    random_test()
+
+    # timing tests
     # time_test1()
     # time_test2()
     # time_test3()

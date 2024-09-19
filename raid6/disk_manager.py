@@ -12,6 +12,7 @@ class DiskManager:
         self.disk_size = disk_size
         self.block_size = block_size
         self.block_num = int(disk_size // block_size)
+        # f: folder
         if disks is None:
             self.disks = [
                 ('f', './disks/'),
@@ -26,6 +27,7 @@ class DiskManager:
         self.disk_num = len(disks)
 
 
+    # if a block is accessible
     def check_block(self, disk_idx, block_idx):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
@@ -35,6 +37,7 @@ class DiskManager:
             return 0
 
 
+    # if a disk is accessible
     def check_disk(self, disk_idx):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
@@ -45,10 +48,12 @@ class DiskManager:
 
     def reset_disk(self, disk_idx):
         if self.disks[disk_idx][0] == 'f':
+            # create a new disk folder
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
             if os.path.exists(disk_path):
                 shutil.rmtree(disk_path)
             os.makedirs(disk_path)
+            # init all blocks to zero
             for i in range(self.block_num):
                 block_path = os.path.join(disk_path, 'block_{}'.format(i))
                 with open(block_path, 'wb') as f:
@@ -59,20 +64,24 @@ class DiskManager:
     def reset_block(self, disk_idx, block_idx):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
+            # disk not accessible
             if not os.path.exists(disk_path):
                 return -1
             block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
+            # reset the block to zero
             with open(block_path, 'wb') as f:
                 f.write(b'\x00' * self.block_size)
             return 0
 
 
     def check_failure(self, block_idx):
+        # check every disk
         for d in range(self.disk_num):
             if self.disks[d][0] == 'f':
                 disk_path = os.path.join(self.disks[d][1], 'disk_{}'.format(d))
                 if not os.path.isdir(disk_path):
                     return -1
+                # block is missing
                 block_path = os.path.join(disk_path, 'block_{}'.format(block_idx))
                 if not os.path.isfile(block_path):
                     return -2
@@ -80,6 +89,7 @@ class DiskManager:
 
 
     def write_block(self, block, disk_idx, block_idx, force=False):
+        # check disk failures in every time of writing
         res = self.check_failure(block_idx)
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
@@ -90,7 +100,7 @@ class DiskManager:
                 return 0
             if not force:
                 return res
-            # force to write
+            # force to write (used in recovery)
             if not os.path.isdir(disk_path):
                 os.makedirs(disk_path)
             with open(block_path, 'wb') as file:
@@ -116,6 +126,7 @@ class DiskManager:
     def fail_disk(self, disk_idx):
         if self.disks[disk_idx][0] == 'f':
             disk_path = os.path.join(self.disks[disk_idx][1], 'disk_{}'.format(disk_idx))
+            # remove the folder
             if os.path.exists(disk_path):
                 shutil.rmtree(disk_path)
             return 0
@@ -133,6 +144,7 @@ class DiskManager:
             with open(block_path, 'rb') as f:
                 data = bytearray(f.read())
             for i in range(len(data)):
+                # randomly change some bytes in the block
                 if random.random() < 0.2:
                     data[i] = random.randint(0, 255)
             with open(block_path, 'wb') as f:

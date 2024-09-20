@@ -32,31 +32,39 @@ def failure_fix(D: list, pos: list) -> list:
         raise Exception('At most two disk failure at the same time can be fixed')
     if len(pos) == 0:
         return pos
+        
+    # Just one drive lost
     if len(pos) == 1:
         D_ = D.copy()
-        if pos[0] == total-2: # disk with P fails
+        if pos[0] == total-2: 
+            # disk with P fails
             P = sum_list(D_[:-2])
             return [P]
-        elif pos[0] == total-1: # disk with Q fails
+        elif pos[0] == total-1: 
+            # disk with Q fails
             Q = sum_list_Q(D_[:-2])
             return [Q]
-        else: # disk with data fails
+        else: 
+            # disk with data fails
             tmp = D_[:-1].copy()
             tmp.pop(pos[0])
             Dx = sum_list(tmp)
             return [Dx]
-
+    
+    # Two drives lost
     if len(pos) == 2:
         if pos[0]>= pos[1]:
             raise Exception('Please make sure pos[0] < pos[1]')
         D_ = D.copy()
         g = 2
-        if pos[0]==total-2 and pos[1]==total-1: # disks with P & Q fail
+        if pos[0]==total-2 and pos[1]==total-1: 
+            # disks with P & Q fail
             P = sum_list(D_[:-2])
             Q = sum_list_Q(D_[:-2])
             return [P,Q]
 
-        if pos[1] == total-2: # disks with a data and P fail
+        if pos[1] == total-2: 
+            # disks with a data and P fail
             Qx = sum_list_Q(D_[:-2])
             Dx = _mygf.add(D_[-1], Qx)
             Dx = _mygf.multiply(Dx, _mygf.power(g, 255-pos[0]))
@@ -64,7 +72,8 @@ def failure_fix(D: list, pos: list) -> list:
             P = sum_list(D_[:-2])
             return [Dx, P]
 
-        if pos[1] == total-1: # disks with a data and Q fail
+        if pos[1] == total-1: 
+            # disks with a data and Q fail
             Dx = sum_list(D_[:-1])
             D_[pos[0]] = Dx
             Q = sum_list_Q(D_[:-2])
@@ -83,7 +92,7 @@ def failure_fix(D: list, pos: list) -> list:
         A = _mygf.multiply(A, T)  # B = g^(-x) * (g^(y-x) + 01)^-1
         Dx = _mygf.multiply(A, _mygf.add(P, Pxy))
         Dx = _mygf.add(Dx, _mygf.multiply(B, _mygf.add(Q, Qxy))) # Dx = A(P+Pxy)+B(Q+Qxy)
-        Dy = _mygf.add(Dx, _mygf.add(P, Pxy))
+        Dy = _mygf.add(Dx, _mygf.add(P, Pxy)) # Dy = Dx + P +Pxy
 
         return [Dx, Dy]
 
@@ -91,28 +100,32 @@ def failure_fix(D: list, pos: list) -> list:
 
 
 def corruption_check_fix(D: list) -> list:
-    # No error return [-1], If error return [pos, correction]
+    # No error return [-1, None], If error return [pos, correction]
     total = len(D)
+    # Compute standard syndrome sets and get the latest ones
     Px = sum_list(D[:-2])
     Qx = sum_list_Q(D[:-2])
     P = D[-2]
     Q = D[-1]
-    if P == Px and Q == Qx:
+    
+    if P == Px and Q == Qx: 
+        # No error
         return [-1, None]
     P_ = _mygf.add(P, Px)
     Q_ = _mygf.add(Q, Qx)
-    if P_ == 0: # Q drive corruption
+    if P_ == 0: 
+        # Q drive corruption
         return [total-1, Qx]
-    if Q_ == 0: # P drive corruption
+    if Q_ == 0: 
+        # P drive corruption
         return [total-2, Px]
 
     # Data drive corruption
     z = _mygf.log(Q_) - _mygf.log(P_)
-    if z < 0: 
+    if z < 0:
+        # Modulo process to prevent out-of-range
         z = z + 255
-    if z >= total:
-        print(_mygf.log(Q_))
-        print(_mygf.log(P_))
+
     D_ = D.copy()
     D_[z] = 0
     Dz = sum_list(D_[:-1])

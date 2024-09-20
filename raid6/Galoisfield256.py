@@ -1,15 +1,19 @@
 
 class Galoisfield256:
     def __init__(self):
+        # Irreducible polynomial for GF(2^8), represented as 0x11d
         self.irreducible_poly = 0x11d
+        # Lookup tables for multiplication and power operations
         self.multi_dict = []
         self.power_dict = []
+         # Precomputing multiplication table for GF(256)
         for i in range(256):
             temp = []
             for j in range(256):
                 res = 0
                 a=i
                 b=j
+                # Multiply a and b using bitwise operations, following GF(2^8) rules
                 while(b > 0):
                     if b & 1:
                         res = res ^ a
@@ -19,7 +23,7 @@ class Galoisfield256:
                     b = b>>1
                 temp.append(res)
             self.multi_dict.append(temp)
-        
+        # Precomputing power table for GF(256)
         for i in range(256):
             temp = []
             for j in range(256):
